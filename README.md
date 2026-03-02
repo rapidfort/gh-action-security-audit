@@ -1,240 +1,102 @@
-# gha-security-audit
+# gh-actions-audit
 
-A shell script that scans GitHub repositories across your organizations for common GitHub Actions security misconfigurations — before attackers find them first.
+A security audit tool for GitHub Actions workflows across an entire GitHub organization.
 
----
+## Why this exists
 
-## Why This Matters
+In February 2026, the [hackerbot-claw](https://www.stepsecurity.io/blog/hacking-millions-of-repos-with-github-actions) campaign demonstrated large-scale exploitation of misconfigured GitHub Actions workflows. The attack leveraged five vectors:
 
-GitHub Actions workflows are a frequent target for supply chain attacks. Two of the most dangerous misconfigurations are:
+1. **Pwn requests** — `pull_request_target` workflows that check out and execute fork code, giving attackers RCE with the target repo's secrets and write token
+2. **Unguarded `issue_comment` triggers** — workflows any GitHub user can invoke by commenting on a public repo's issues
+3. **Shell injection** — `${{ github.event.* }}` expressions interpolated directly into `run:` blocks (branch names, PR titles, commit messages)
+4. **Filename injection** — base64-encoded commands in filenames processed by bash loops in CI
+5. **AI prompt injection** — poisoned config files (e.g. `CLAUDE.md`) executed by AI coding agents during `pull_request_target` checkouts
 
-1. **`pull_request_target` trigger with a write-permission token** — This trigger runs in the context of the *base* repository (not the fork), meaning a malicious PR from an external contributor can execute code with full write access to your repo secrets and contents. This was the attack vector in several high-profile CI/CD breaches.
+This tool scans an org's workflows for these patterns and generates a report highlighting what needs review.
 
-2. **Default `GITHUB_TOKEN` set to `write`** — When any workflow in your repo is triggered (including from forks or third-party actions), it gets write access by default — a broad privilege that violates the principle of least privilege.
+## What it checks
 
-This tool gives you a single command to audit your entire GitHub organization for these patterns, so you can fix them before they become incidents.
+### Per-repository
+- Whether workflows have explicit `permissions:` blocks (workflows without one inherit the org default, which may be `write`)
+- `pull_request_target` usage, sub-classified by risk:
+  - **API-only** — no checkout, used for labeling/auto-merge (low risk)
+  - **checkout, has guard** — checks out fork code but gates on author (e.g. `dependabot[bot]`)
+  - **checkout+exec, no guard** — checks out and runs fork code with no restriction (highest risk)
+- `issue_comment` triggers, noting whether an `author_association` or actor check is present
+- Repo-level secret names (not values)
+- Dependabot false-positive tagging — workflows gated to `dependabot[bot]` are marked so reviewers can skip them
 
----
+### Org-level
+- Default workflow token permissions (`read` vs `write`)
+- Whether workflows can approve pull requests
+- Allowed actions policy (all, verified creators, or selected)
+- All org secrets with visibility scope, which repos are configured for access, and which repos actually reference each secret in their workflow files
+- For overly broad secrets (`All repositories` visibility): a ready-to-run `gh secret set` command to restrict them to only the repos that use them
 
-## What It Detects
+## Requirements
 
-| Check | What It Looks For |
-|---|---|
-| `pull_request_target` usage | Workflows that use this high-risk trigger |
-| Default `GITHUB_TOKEN` permissions | Whether the token defaults to `read` or `write` |
-| PR review approval by Actions | Whether workflows can auto-approve pull request reviews |
-| Per-workflow permission blocks | Whether workflows explicitly scope down their permissions |
-| Effective write risk | Combines token default + explicit `permissions:` block to assess real exposure |
+- [GitHub CLI (`gh`)](https://cli.github.com/) authenticated as an **admin** of the target org
+- `bash` (4.0+), `python3` (for JSON parsing), standard Unix tools (`grep`, `find`, `sort`, etc.)
+- Admin scopes needed: `admin:org` (for org settings and secrets), repo admin access (for repo secrets)
 
-### Risk Flags
-
-| Flag | Meaning |
-|---|---|
-| `CHECK` | `pull_request_target` + write-default token — **needs immediate review** |
-| `SAFE?` | `pull_request_target` + read-default token — lower risk, but verify |
-| `NOTE` | Write-default token, no `pull_request_target` — worth tightening |
-| `-` | No issues detected |
-
----
-
-## Prerequisites
-
-- [`gh` CLI](https://cli.github.com/) — authenticated via `gh auth login`
-- [`jq`](https://jqlang.github.io/jq/) — JSON processor
-- Admin access to the repositories or organization you want to scan
-
----
-
-## Installation
+Verify your access:
 
 ```bash
-# Clone the repo
-git clone https://github.com/rapidfort/gha-security-audit.git
-cd gha-security-audit
-
-# Make the script executable
-chmod +x gh-actions-audit.sh
+gh auth status
+gh api orgs/<YOUR_ORG>/actions/permissions
 ```
-
-No dependencies to install beyond `gh` and `jq`.
-
----
 
 ## Usage
 
-```bash
-# Scan all organizations where you have admin access (auto-discovery)
-./gh-actions-audit.sh
-
-# Scan a specific organization
-./gh-actions-audit.sh <org-name>
-
-# Scan your personal repositories only
-./gh-actions-audit.sh --user
-
-# Scan all orgs + personal repos
-./gh-actions-audit.sh --all
-
-# Show help
-./gh-actions-audit.sh --help
+```
+./gh-actions-audit.sh <ORG> [OPTIONS]
 ```
 
-### Example
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--out FILE` | Path for markdown report output. Default: `./<ORG>-actions-audit.md` |
+| `--csv FILE` | Path for CSV report output. Omit to skip CSV generation. |
+| `--local DIR` | Reuse previously downloaded workflow files instead of re-fetching from the API. Accepts the top-level audit directory or its `workflows/` subdirectory. |
+| `--cleanup` | Delete cached workflow files after the run completes. |
+| `-h, --help` | Show built-in help and exit. |
+
+### Examples
 
 ```bash
-./gh-actions-audit.sh rapidfort
+# Full scan — downloads all workflows, writes markdown report
+./gh-actions-audit.sh my-org
+
+# Output both markdown and CSV
+./gh-actions-audit.sh my-org --out audit.md --csv audit.csv
+
+# Reuse a previous download (saves time on large orgs)
+./gh-actions-audit.sh my-org --local /tmp/gh-actions-audit-my-org-20260301
+
+# Scan and clean up cached files afterward
+./gh-actions-audit.sh my-org --cleanup
 ```
 
-```
-Fetching repos for org: rapidfort
+### How it works
 
-===========================================================================
-GitHub Actions Security Audit
-Scope: pull_request_target usage + Default GITHUB_TOKEN permissions
-===========================================================================
-Repositories to scan: 42
+1. **Download** — Enumerates all non-archived repos in the org, downloads `.github/workflows/*.yml` files via the GitHub API (skipped with `--local`)
+2. **Analyze** — Scans each workflow for `pull_request_target`, `issue_comment`, `permissions:` blocks, and secret references using grep-based heuristics
+3. **Org secrets** — Lists all org-level secrets, maps each to the repos that reference it in workflows, and generates remediation commands for overly broad access
+4. **Org settings** — Checks default workflow permissions, PR approval policy, and allowed actions
+5. **Report** — Writes a markdown report (and optionally CSV) with per-repo tables, org-level findings, and review guidance
 
-REPOSITORY                                    VIS      TOKEN-DEFAULT   PR-APPROVE   PR-TARGET    RISK
-----------                                    ---      -------------   ----------   ---------    ----
-rapidfort/api-service                         public   write           false        YES(2)       CHECK
-rapidfort/frontend                            private  read            false        no           -
-rapidfort/deploy-scripts                      private  write           false        no           NOTE
-rapidfort/community-charts                    public   read            false        YES(1)       SAFE?
-...
-
-===========================================================================
-SUMMARY
-===========================================================================
-  Total repos scanned:          42
-  Repos with pull_request_target:
-    needing review (CHECK):     3
-    likely safe (SAFE?):        2
-
-Detailed per-workflow analysis saved to: /tmp/gh-audit-details-1709123456.txt
-```
-
----
+For large orgs (hundreds of repos), the initial download can take several minutes. The `--local` flag lets you re-run analysis without re-downloading.
 
 ## Output
 
-### Console Table
+The markdown report includes:
 
-| Column | Description |
-|---|---|
-| `REPOSITORY` | `org/repo` slug |
-| `VIS` | `public` or `private` |
-| `TOKEN-DEFAULT` | Default `GITHUB_TOKEN` permission (`read`, `write`, or `unknown`) |
-| `PR-APPROVE` | Whether Actions can approve pull request reviews (`true`/`false`) |
-| `PR-TARGET` | Number of workflows using `pull_request_target`, e.g. `YES(2)` |
-| `RISK` | Summary risk flag: `CHECK`, `SAFE?`, `NOTE`, or `-` |
-
-### Detail File
-
-A detailed per-workflow breakdown is saved to `/tmp/gh-audit-details-<timestamp>.txt`, including:
-
-- Visibility and default token permission
-- Whether each workflow uses `pull_request_target`
-- Whether a `permissions:` block is present
-- Explicit `contents:` and `pull-requests:` permission values
-- Whether the workflow follows the safe pattern (`contents: read` + `pull-requests: write`)
-- Per-workflow effective write risk and risk level (`HIGH`, `MEDIUM`, `LOW`)
-
----
-
-## Remediation Guide
-
-### Fix 1 — Restrict the default `GITHUB_TOKEN` to read-only
-
-In your GitHub organization or repository settings:
-
-> **Settings → Actions → General → Workflow permissions → Read repository contents and packages permissions**
-
-Or enforce it at the org level so all repos inherit it automatically.
-
-### Fix 2 — Add explicit `permissions:` blocks to workflows using `pull_request_target`
-
-```yaml
-# Bad: inherits default (possibly write) token
-on:
-  pull_request_target:
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps: ...
-```
-
-```yaml
-# Good: explicitly scoped permissions
-on:
-  pull_request_target:
-
-permissions:
-  contents: read
-  pull-requests: write   # only if the workflow needs to comment on PRs
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps: ...
-```
-
-### Fix 3 — Avoid checking out PR code in `pull_request_target` workflows
-
-If you must use `pull_request_target`, **never** check out the PR's code (`ref: ${{ github.event.pull_request.head.sha }}`) in a step that also has access to secrets. Keep secret-using steps separate from untrusted code execution.
-
----
-
-## Understanding the Risk
-
-### The `pull_request_target` + write token attack chain
-
-1. Attacker forks your public repo and opens a pull request
-2. Your workflow uses `pull_request_target` — it runs in the context of **your** repo with **your** token
-3. If the workflow checks out the PR's code and runs it (e.g., `npm install`, `make`, scripts), the attacker's code executes with your write token
-4. Attacker can exfiltrate secrets, push malicious code, or tamper with releases
-
-This is not theoretical — it has been exploited in real CI/CD pipeline attacks.
-
-### Why `unknown` token default matters
-
-If `TOKEN-DEFAULT` shows `unknown`, the `gh` API couldn't determine the setting, which typically means the org-level setting is in an intermediate state. Treat it as potentially `write` and verify manually in your GitHub settings UI.
-
----
-
-## Limitations
-
-- Requires admin access to each repository to read workflow permissions settings
-- Workflow content analysis is text-based (regex), not a full YAML parser — complex anchors or multi-document YAML may not be fully analyzed
-- Does not detect secrets misconfiguration, third-party action pinning issues, or OIDC misconfigurations (these may be added in future versions)
-- Scans up to 1000 repositories per organization (GitHub API limit per page with `--paginate`)
-
----
-
-## Contributing
-
-Contributions are welcome. If you find a misconfiguration pattern that isn't detected, or want to improve the output format or remediation guidance, please open an issue or pull request.
-
-Areas where help is especially appreciated:
-- Additional security checks (unpinned actions, OIDC configuration, secret exposure patterns)
-- Output formats (JSON, CSV, SARIF for GitHub Code Scanning integration)
-- GitHub Actions workflow to run this as a scheduled org-wide audit
-
----
-
-## References
-
-- [StepSecurity — hackerbot-claw: An AI-Powered Bot Actively Exploiting GitHub Actions (Microsoft, DataDog, CNCF projects hit)](https://www.stepsecurity.io/blog/hackerbot-claw-github-actions-exploitation)
-- [GitHub Docs — Security hardening for GitHub Actions](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions)
-- [GitHub Docs — Keeping your GitHub Actions and workflows secure: Preventing pwn requests](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/)
-- [CISA — Defending CI/CD Environments](https://www.cisa.gov/resources-tools/resources/defending-continuous-integration-continuous-delivery-cicd-environments)
-
----
+- **Org-Level Settings** table with current values and recommendations
+- **Per-Repository Audit** table with columns for permissions, `pull_request_target` classification, `issue_comment` triggers, and repo secrets
+- **Org-Level Secrets** table showing visibility, configured access, actual workflow usage, and `gh secret set` remediation commands
+- **Review Guidance** section explaining priority items, what the fork approval setting does and does not protect, and mitigations to look for
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
-
----
-
-*Built by [RapidFort](https://rapidfort.com) to help the community secure their software supply chains.*
+Apache-2.0

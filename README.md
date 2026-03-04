@@ -33,45 +33,45 @@ This tool scans an org's workflows for these patterns and generates a report hig
 
 ### Per-Repository Checks
 
-| ID | Check | Risk | What it detects |
-|----|-------|------|-----------------|
-| GHA-001 | **Explicit `permissions:`** | Medium | Workflows missing `permissions:` blocks inherit org default (often `write`) |
-| GHA-002 | **`pull_request_target`** | Critical | Pwn request attack surface — checkout+exec of fork code with target repo secrets |
-| GHA-003 | **`issue_comment` gating** | High | Workflows any GitHub user can trigger by commenting on public issues/PRs |
-| GHA-004 | **Unpinned Actions** | High | Action references using mutable tags (`@v4`, `@main`) vulnerable to tag-override attacks |
-| GHA-005 | **Expression Injection** | Critical | `${{ github.event.* }}` in `run:` blocks — shell injection via PR titles, branch names, etc. |
-| GHA-006 | **`workflow_run` artifacts** | High | `workflow_run` workflows that download and execute artifacts (poisoning risk) |
-| GHA-007 | **Self-Hosted Runners** | High | `runs-on: self-hosted` — persistent machines vulnerable to credential theft |
-| GHA-008 | **Dangerous Permissions** | Medium | `permissions: write-all`, `contents: write`, and other excessive grants |
-| GHA-009 | **Hardcoded Secrets** | Critical | Hardcoded tokens/keys in workflow files (`ghp_*`, `gho_*`, `AKIA*`) |
-| GHA-010 | **Harden-Runner** | Info | Whether the repo uses [step-security/harden-runner](https://github.com/step-security/harden-runner) |
-| GHA-014 | **`secrets: inherit`** | High | Reusable workflow calls using `secrets: inherit` — passes all secrets |
-| GHA-015 | **Env injection** | Critical | Untrusted data written to `GITHUB_ENV`, `GITHUB_PATH`, or `GITHUB_OUTPUT` |
-| GHA-016 | **Extended expression contexts** | Critical | Additional dangerous contexts: `discussion.title`, `head_commit.message`, `pages.*.page_name` |
-| GHA-017 | **Deprecated commands** | High | `::set-output`, `::set-env`, `::add-path` — deprecated injection vectors |
-| GHA-018 | **Known-compromised actions** | Critical | `tj-actions/changed-files`, `reviewdog/action-setup`, and other compromised actions |
-| GHA-019 | **`github.event.ref` injection** | High | `github.event.ref` in `run:` blocks — attacker-controlled branch/tag names |
-| GHA-020 | **Third-party unpinned** | Medium | Distinguishes first-party (`actions/*`) from third-party unpinned actions |
-| GHA-021 | **PRT untrusted ref checkout** | Critical | `pull_request_target` checkout of `head.sha`, `head.ref`, or PR merge ref |
-| GHA-022 | **`always()` + secrets** | High | `if: always()` or `continue-on-error` combined with secret access |
-| GHA-023 | **Artifact trust** | High | `actions/download-artifact` usage without integrity validation |
-| GHA-024 | **Missing environment** | Medium | Deployment workflows (`docker push`, `terraform apply`) without `environment:` protection |
-| GHA-025 | **Cache poisoning** | High | `actions/cache` in fork-triggered workflows — shared cache poisoning risk |
-| GHA-026 | **Static credentials** | Medium | Static cloud credentials (`AWS_ACCESS_KEY_ID`, etc.) instead of OIDC federation |
-| — | **Repo Secrets** | Info | Secret names configured on the repo (informational listing) |
+| ID | Check | Risk | What it detects | CCI | NIST 800-53 |
+|----|-------|------|-----------------|-----|-------------|
+| GHA-001 | **Explicit `permissions:`** | Medium | Workflows missing `permissions:` blocks inherit org default (often `write`) | CCI-000225 | AC-6 |
+| GHA-002 | **`pull_request_target`** | Critical | Pwn request attack surface — checkout+exec of fork code with target repo secrets | CCI-000213, CCI-001310 | AC-3, SI-10 |
+| GHA-003 | **`issue_comment` gating** | High | Workflows any GitHub user can trigger by commenting on public issues/PRs | CCI-000213 | AC-3 |
+| GHA-004 | **Unpinned Actions** | High | Action references using mutable tags (`@v4`, `@main`) vulnerable to tag-override attacks | CCI-002706 | SI-7 (1) |
+| GHA-005 | **Expression Injection** | Critical | `${{ github.event.* }}` in `run:` blocks — shell injection via PR titles, branch names, etc. | CCI-001310 | SI-10 |
+| GHA-006 | **`workflow_run` artifacts** | High | `workflow_run` workflows that download and execute artifacts (poisoning risk) | CCI-002706, CCI-000213 | SI-7 (1), AC-3 |
+| GHA-007 | **Self-Hosted Runners** | High | `runs-on: self-hosted` — persistent machines vulnerable to credential theft | CCI-000366 | CM-6 |
+| GHA-008 | **Dangerous Permissions** | Medium | `permissions: write-all`, `contents: write`, and other excessive grants | CCI-000225, CCI-000381 | AC-6, CM-7 |
+| GHA-009 | **Hardcoded Secrets** | Critical | Hardcoded tokens/keys in workflow files (`ghp_*`, `gho_*`, `AKIA*`) | CCI-000196 | IA-5 (1) |
+| GHA-010 | **Harden-Runner** | Info | Whether the repo uses [step-security/harden-runner](https://github.com/step-security/harden-runner) | CCI-002724 | SI-7 (8) |
+| GHA-014 | **`secrets: inherit`** | High | Reusable workflow calls using `secrets: inherit` — passes all secrets | CCI-000225 | AC-6 |
+| GHA-015 | **Env injection** | Critical | Untrusted data written to `GITHUB_ENV`, `GITHUB_PATH`, or `GITHUB_OUTPUT` | CCI-001310 | SI-10 |
+| GHA-016 | **Extended expression contexts** | Critical | Additional dangerous contexts: `discussion.title`, `head_commit.message`, `pages.*.page_name` | CCI-001310 | SI-10 |
+| GHA-017 | **Deprecated commands** | High | `::set-output`, `::set-env`, `::add-path` — deprecated injection vectors | CCI-001310, CCI-000366 | SI-10, CM-6 |
+| GHA-018 | **Known-compromised actions** | Critical | `tj-actions/changed-files`, `reviewdog/action-setup`, and other compromised actions | CCI-002706 | SI-7 (1) |
+| GHA-019 | **`github.event.ref` injection** | High | `github.event.ref` in `run:` blocks — attacker-controlled branch/tag names | CCI-001310 | SI-10 |
+| GHA-020 | **Third-party unpinned** | Medium | Distinguishes first-party (`actions/*`) from third-party unpinned actions | CCI-002706 | SI-7 (1) |
+| GHA-021 | **PRT untrusted ref checkout** | Critical | `pull_request_target` checkout of `head.sha`, `head.ref`, or PR merge ref | CCI-000213, CCI-001310 | AC-3, SI-10 |
+| GHA-022 | **`always()` + secrets** | High | `if: always()` or `continue-on-error` combined with secret access | CCI-000213 | AC-3 |
+| GHA-023 | **Artifact trust** | High | `actions/download-artifact` usage without integrity validation | CCI-002706 | SI-7 (1) |
+| GHA-024 | **Missing environment** | Medium | Deployment workflows (`docker push`, `terraform apply`) without `environment:` protection | CCI-000213, CCI-000366 | AC-3, CM-6 |
+| GHA-025 | **Cache poisoning** | High | `actions/cache` in fork-triggered workflows — shared cache poisoning risk | CCI-002706 | SI-7 (1) |
+| GHA-026 | **Static credentials** | Medium | Static cloud credentials (`AWS_ACCESS_KEY_ID`, etc.) instead of OIDC federation | CCI-000225, CCI-000196 | AC-6, IA-5 (1) |
+| — | **Repo Secrets** | Info | Secret names configured on the repo (informational listing) | — | — |
 
 ### Org-Level Checks
 
-| ID | Check | Risk | What it detects |
-|----|-------|------|-----------------|
-| GHA-011 | **Default workflow permissions** | High | Org default `write` gives all workflows read/write `GITHUB_TOKEN` |
-| GHA-012 | **PR approval by workflows** | Medium | Whether workflows can approve pull requests (self-approval risk) |
-| GHA-013 | **Allowed actions policy** | Medium | Whether all actions are allowed or restricted to verified/selected |
-| GHA-027 | **SHA pinning enforcement** | Medium | Whether the org enforces SHA pinning for all action references |
-| GHA-028 | **Actions repository policy** | Medium | Whether Actions is restricted to selected repositories or allowed for all |
-| GHA-029 | **Org secret scoping** | Medium | Secrets with `All repositories` scope accessible from any repo |
-| — | **Secret usage mapping** | Info | Maps each org secret to repos that reference it, flags unused broad access |
-| — | **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets |
+| ID | Check | Risk | What it detects | CCI | NIST 800-53 |
+|----|-------|------|-----------------|-----|-------------|
+| GHA-011 | **Default workflow permissions** | High | Org default `write` gives all workflows read/write `GITHUB_TOKEN` | CCI-000225 | AC-6 |
+| GHA-012 | **PR approval by workflows** | Medium | Whether workflows can approve pull requests (self-approval risk) | CCI-000213 | AC-3 |
+| GHA-013 | **Allowed actions policy** | Medium | Whether all actions are allowed or restricted to verified/selected | CCI-000381, CCI-001762 | CM-7, CM-7 (1) |
+| GHA-027 | **SHA pinning enforcement** | Medium | Whether the org enforces SHA pinning for all action references | CCI-002706, CCI-000366 | SI-7 (1), CM-6 |
+| GHA-028 | **Actions repository policy** | Medium | Whether Actions is restricted to selected repositories or allowed for all | CCI-000381 | CM-7 |
+| GHA-029 | **Org secret scoping** | Medium | Secrets with `All repositories` scope accessible from any repo | CCI-000225, CCI-000183 | AC-6, IA-5 |
+| — | **Secret usage mapping** | Info | Maps each org secret to repos that reference it, flags unused broad access | — | — |
+| — | **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets | — | — |
 
 ### Key Incidents Driving These Checks
 

@@ -744,6 +744,31 @@
   implemented: true
   card: 4yh
 
+- id: GHA-028
+  title: "Organization SHOULD restrict which repositories can use GitHub Actions"
+  desc: >
+    The enabled_repositories org setting controls which repositories can
+    use GitHub Actions (all, none, or selected). Allowing all repositories
+    increases the attack surface, especially if some repos are public or
+    less actively maintained.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions that
+    enabled_repositories is set to 'selected' (not 'all').
+  fix: >
+    Restrict Actions to selected repositories: Settings → Actions →
+    General → Policies → select 'Enable for select repositories'.
+    Add only repositories that need CI/CD workflows.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000381  # CM-7: Least Functionality
+  nist:
+    - CM-7
+  owasp_cicd: CICD-SEC-1
+  classifier: org_enabled_repositories
+  implemented: true
+  card: 4yh
+
 - id: GHA-029
   title: "Organization secrets SHOULD be scoped to selected repositories, not all"
   desc: >
@@ -769,28 +794,3 @@
   owasp_cicd: CICD-SEC-6
   classifier: org_secret_scoping
   implemented: true
-
-- id: GHA-028
-  title: "Organization SHOULD restrict which repositories can use GitHub Actions"
-  desc: >
-    The enabled_repositories org setting controls which repositories can
-    use GitHub Actions (all, none, or selected). Allowing all repositories
-    increases the attack surface, especially if some repos are public or
-    less actively maintained.
-  check: >
-    Verify via gh api orgs/<ORG>/actions/permissions that
-    enabled_repositories is set to 'selected' (not 'all').
-  fix: >
-    Restrict Actions to selected repositories: Settings → Actions →
-    General → Policies → select 'Enable for select repositories'.
-    Add only repositories that need CI/CD workflows.
-  impact: 0.5
-  severity: medium
-  cci:
-    - CCI-000381  # CM-7: Least Functionality
-  nist:
-    - CM-7
-  owasp_cicd: CICD-SEC-1
-  classifier: org_enabled_repositories
-  implemented: true
-  card: 4yh

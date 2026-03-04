@@ -58,7 +58,7 @@ This tool scans an org's workflows for these patterns and generates a report hig
 | GHA-024 | **Missing environment** | Medium | Deployment workflows (`docker push`, `terraform apply`) without `environment:` protection | CCI-000213, CCI-000366 | AC-3, CM-6 |
 | GHA-025 | **Cache poisoning** | High | `actions/cache` in fork-triggered workflows — shared cache poisoning risk | CCI-002706 | SI-7 (1) |
 | GHA-026 | **Static credentials** | Medium | Static cloud credentials (`AWS_ACCESS_KEY_ID`, etc.) instead of OIDC federation | CCI-000225, CCI-000196 | AC-6, IA-5 (1) |
-| — | **Repo Secrets** | Info | Secret names configured on the repo (informational listing) | — | — |
+| — | **Repo Secrets** | Info | Secret names configured on the repo (informational listing) | CCI-000183 | IA-5 |
 
 ### Org-Level Checks
 
@@ -70,8 +70,8 @@ This tool scans an org's workflows for these patterns and generates a report hig
 | GHA-027 | **SHA pinning enforcement** | Medium | Whether the org enforces SHA pinning for all action references | CCI-002706, CCI-000366 | SI-7 (1), CM-6 |
 | GHA-028 | **Actions repository policy** | Medium | Whether Actions is restricted to selected repositories or allowed for all | CCI-000381 | CM-7 |
 | GHA-029 | **Org secret scoping** | Medium | Secrets with `All repositories` scope accessible from any repo | CCI-000225, CCI-000183 | AC-6, IA-5 |
-| — | **Secret usage mapping** | Info | Maps each org secret to repos that reference it, flags unused broad access | — | — |
-| — | **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets | — | — |
+| — | **Secret usage mapping** | Info | Maps each org secret to repos that reference it, flags unused broad access | CCI-000225, CCI-000183 | AC-6, IA-5 |
+| — | **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets | CCI-000225 | AC-6 |
 
 ### Key Incidents Driving These Checks
 

@@ -82,6 +82,34 @@ json_escape() {
   printf '%s' "$s"
 }
 
+# emit_hdf_requirement: output a single HDF v2 Evaluated_Requirement JSON object.
+# Schema: hdf-results.schema.json → $defs/Evaluated_Requirement
+# Args: id title impact severity status code_desc message
+# severity: "critical" | "high" | "medium" | "low" | "informational"
+# status: "passed" | "failed" | "notApplicable" | "notReviewed" | "error"
+# code_desc: description of what was checked
+# message: detail message (omit for no message)
+emit_hdf_requirement() {
+  local id="$1" title="$2" impact="$3" severity="$4" status="$5"
+  local code_desc="$6" message="${7:-}"
+  local esc_title esc_code_desc
+  esc_title=$(json_escape "$title")
+  esc_code_desc=$(json_escape "$code_desc")
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Build message field only if provided
+  local message_field=""
+  if [ -n "$message" ]; then
+    local esc_message
+    esc_message=$(json_escape "$message")
+    message_field=", \"message\": \"$esc_message\""
+  fi
+
+  printf '{"id": "%s", "title": "%s", "descriptions": [{"label": "default", "data": "%s"}], "impact": %s, "severity": "%s", "tags": {}, "results": [{"status": "%s", "codeDesc": "%s", "startTime": "%s"%s}]}' \
+    "$id" "$esc_title" "$esc_title" "$impact" "$severity" "$status" "$esc_code_desc" "$now" "$message_field"
+}
+
 # --- Argument Parsing --------------------------------------------------------
 
 # require_arg: validate that an option has a non-empty, non-flag argument

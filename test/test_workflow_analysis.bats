@@ -78,6 +78,12 @@ setup() {
   assert_success
 }
 
+@test "prt-checkout-commented-out: commented-out checkout is NOT detected" {
+  # A commented-out actions/checkout should not count as a checkout
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/prt-checkout-commented-out.yml' | grep -q 'actions/checkout'"
+  assert_failure
+}
+
 @test "prt-in-comment: NOT a false positive — comment-only pull_request_target is ignored" {
   # The trigger check should use uncommented content only
   run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/prt-in-comment.yml' | grep -q 'pull_request_target'"
@@ -215,6 +221,12 @@ _run_classifier() {
   assert_output --partial "API-only"
 }
 
+@test "classify_prt: commented-out checkout classified as API-only" {
+  run _run_classifier classify_prt "$FIXTURES_DIR/workflows/prt-checkout-commented-out.yml"
+  assert_success
+  assert_output --partial "API-only"
+}
+
 @test "classify_ic: author_association gate detected" {
   run _run_classifier classify_ic "$FIXTURES_DIR/workflows/issue-comment-with-gate.yml"
   assert_success
@@ -307,6 +319,17 @@ _run_analyze_repo() {
   run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "no author gate"
+}
+
+@test "analyze_repo: prt-checkout-commented-out classified as API-only" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/prt-checkout-commented-out.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "API-only"
+  refute_output --partial "checkout+exec"
+  refute_output --partial "checkout, no fork ref"
 }
 
 @test "analyze_repo: prt-in-comment does NOT report pull_request_target" {

@@ -335,10 +335,10 @@ classify_prt() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   local has_checkout=0 has_fork_ref=0 has_author_guard=0 is_dependabot=0
 
-  [[ $wf_content == *actions/checkout* ]] && has_checkout=1
-  grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' <<<"$wf_content" && has_fork_ref=1
-  grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" <<<"$wf_content" && is_dependabot=1
-  grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" <<<"$wf_content" && has_author_guard=1
+  [[ $wf_uncommented == *actions/checkout* ]] && has_checkout=1
+  grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' <<<"$wf_uncommented" && has_fork_ref=1
+  grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" <<<"$wf_uncommented" && is_dependabot=1
+  grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" <<<"$wf_uncommented" && has_author_guard=1
   grep -q 'author_association' <<<"$wf_uncommented" && has_author_guard=1
 
   local dep_tag=""
@@ -391,7 +391,7 @@ classify_ic() {
   if grep -q 'author_association' <<<"$wf_uncommented"; then
     detail="$wf_name (has author_association)"
     detail_csv="$wf_name (has author_association)"
-  elif grep -qE "user\.login\s*==|actor\s*==" <<<"$wf_content"; then
+  elif grep -qE "user\.login\s*==|actor\s*==" <<<"$wf_uncommented"; then
     detail="$wf_name (has actor check)"
     detail_csv="$wf_name (has actor check)"
   else

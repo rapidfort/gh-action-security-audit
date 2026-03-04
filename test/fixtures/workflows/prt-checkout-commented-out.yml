@@ -1,0 +1,11 @@
+name: PR Target Label
+on: pull_request_target
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      # - uses: actions/checkout@v4  # disabled — not needed for API-only
+      - run: gh pr edit "${{ github.event.number }}" --add-label "needs-review"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

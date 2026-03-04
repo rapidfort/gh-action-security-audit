@@ -661,7 +661,7 @@ classify_unpinned() {
 }
 
 # --- run_repo_classifiers: run all 10 per-repo classifiers on a repo's workflows ---
-# Writes results to a cache file for consumption by analyze_repo and build_hdf_repo_target.
+# Writes results to a cache file for consumption by build_hdf_repo_target and render_md_csv_row.
 # Args: repo_dir cache_file
 # Cache format: TAG|md_detail|csv_detail  or  META|key|value
 # Returns 1 if no workflow files found.
@@ -763,142 +763,6 @@ run_repo_classifiers() {
     echo "META|wf_with_perms|$wf_with_perms"
     echo "META|has_harden_runner|$has_harden_runner"
   } >>"$cache_file"
-}
-
-# --- analyze_repo: analyze a single repo's workflow files ---
-# Reads classifier results from a pre-built cache file and builds MD/CSV rows.
-# Args: repo repo_dir md_file csv_file cache_file
-# Globals: ORG, WORKFLOWS_DIR
-analyze_repo() {
-  local repo="$1"
-  local repo_dir="$2"
-  local md_file="$3"
-  local csv_file="$4"
-  local cache_file="$5"
-
-  # Read META values from cache
-  local total_wf wf_with_perms has_harden_runner
-  total_wf=$(awk -F'|' '$1 == "META" && $2 == "total_wf" {print $3}' "$cache_file")
-  wf_with_perms=$(awk -F'|' '$1 == "META" && $2 == "wf_with_perms" {print $3}' "$cache_file")
-  has_harden_runner=$(awk -F'|' '$1 == "META" && $2 == "has_harden_runner" {print $3}' "$cache_file")
-
-  [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
-
-  # Read classifier findings from cache into arrays
-  local prt_wfs=() prt_wfs_csv=()
-  local ic_wfs=() ic_wfs_csv=()
-  local unpin_wfs=() unpin_wfs_csv=()
-  local expr_wfs=() expr_wfs_csv=()
-  local wfr_wfs=() wfr_wfs_csv=()
-  local sh_wfs=() sh_wfs_csv=()
-  local dp_wfs=() dp_wfs_csv=()
-  local hs_wfs=() hs_wfs_csv=()
-
-  local tag md_detail csv_detail
-  while IFS='|' read -r tag md_detail csv_detail; do
-    case "$tag" in
-      PRT)
-        prt_wfs+=("$md_detail")
-        prt_wfs_csv+=("$csv_detail")
-        ;;
-      IC)
-        ic_wfs+=("$md_detail")
-        ic_wfs_csv+=("$csv_detail")
-        ;;
-      UNPIN)
-        unpin_wfs+=("$md_detail")
-        unpin_wfs_csv+=("$csv_detail")
-        ;;
-      EXPR)
-        expr_wfs+=("$md_detail")
-        expr_wfs_csv+=("$csv_detail")
-        ;;
-      WFR)
-        wfr_wfs+=("$md_detail")
-        wfr_wfs_csv+=("$csv_detail")
-        ;;
-      SH)
-        sh_wfs+=("$md_detail")
-        sh_wfs_csv+=("$csv_detail")
-        ;;
-      DP)
-        dp_wfs+=("$md_detail")
-        dp_wfs_csv+=("$csv_detail")
-        ;;
-      HS)
-        hs_wfs+=("$md_detail")
-        hs_wfs_csv+=("$csv_detail")
-        ;;
-    esac
-  done < <(grep -v '^META|' "$cache_file")
-
-  # --- Build cells ---
-  local perms_cell perms_csv
-  if [ "$wf_with_perms" -eq "$total_wf" ]; then
-    perms_cell="All ($total_wf/$total_wf)"
-    perms_csv="All ($total_wf/$total_wf)"
-  elif [ "$wf_with_perms" -eq 0 ]; then
-    perms_cell="**None** (0/$total_wf)"
-    perms_csv="None (0/$total_wf)"
-  else
-    perms_cell="Partial ($wf_with_perms/$total_wf)"
-    perms_csv="Partial ($wf_with_perms/$total_wf)"
-  fi
-
-  local prt_cell prt_csv
-  prt_cell=$(join_array_cells '<br/>' "${prt_wfs[@]+"${prt_wfs[@]}"}")
-  prt_csv=$(join_array_cells '; ' "${prt_wfs_csv[@]+"${prt_wfs_csv[@]}"}")
-
-  local ic_cell ic_csv
-  ic_cell=$(join_array_cells '<br/>' "${ic_wfs[@]+"${ic_wfs[@]}"}")
-  ic_csv=$(join_array_cells '; ' "${ic_wfs_csv[@]+"${ic_wfs_csv[@]}"}")
-
-  local unpin_cell unpin_csv
-  unpin_cell=$(join_array_cells '<br/>' "${unpin_wfs[@]+"${unpin_wfs[@]}"}")
-  unpin_csv=$(join_array_cells '; ' "${unpin_wfs_csv[@]+"${unpin_wfs_csv[@]}"}")
-
-  local expr_cell expr_csv
-  expr_cell=$(join_array_cells '<br/>' "${expr_wfs[@]+"${expr_wfs[@]}"}")
-  expr_csv=$(join_array_cells '; ' "${expr_wfs_csv[@]+"${expr_wfs_csv[@]}"}")
-
-  local wfr_cell wfr_csv
-  wfr_cell=$(join_array_cells '<br/>' "${wfr_wfs[@]+"${wfr_wfs[@]}"}")
-  wfr_csv=$(join_array_cells '; ' "${wfr_wfs_csv[@]+"${wfr_wfs_csv[@]}"}")
-
-  local sh_cell sh_csv
-  sh_cell=$(join_array_cells '<br/>' "${sh_wfs[@]+"${sh_wfs[@]}"}")
-  sh_csv=$(join_array_cells '; ' "${sh_wfs_csv[@]+"${sh_wfs_csv[@]}"}")
-
-  local dp_cell dp_csv
-  dp_cell=$(join_array_cells '<br/>' "${dp_wfs[@]+"${dp_wfs[@]}"}")
-  dp_csv=$(join_array_cells '; ' "${dp_wfs_csv[@]+"${dp_wfs_csv[@]}"}")
-
-  local hs_cell hs_csv
-  hs_cell=$(join_array_cells '<br/>' "${hs_wfs[@]+"${hs_wfs[@]}"}")
-  hs_csv=$(join_array_cells '; ' "${hs_wfs_csv[@]+"${hs_wfs_csv[@]}"}")
-
-  local hr_cell
-  if [ "$has_harden_runner" -eq 1 ]; then
-    hr_cell="Yes"
-  else
-    hr_cell="No"
-  fi
-
-  local secrets_cell=""
-  local secret_names
-  secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
-    warn "Could not fetch secrets for $repo (may lack repo admin access)."
-    secret_names=""
-  }
-  if [ -z "$secret_names" ]; then
-    secrets_cell="(none)"
-  else
-    secrets_cell=$(paste -sd', ' - <<<"$secret_names")
-  fi
-
-  # Write directly to output files — no fragile head/tail split
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${hs_cell}|${hr_cell}|${secrets_cell}" >>"$md_file"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${hs_csv}|${hr_cell}|${secrets_cell}" >>"$csv_file"
 }
 
 # _hdf_result_*: per-check result functions for HDF output.
@@ -1164,6 +1028,185 @@ build_hdf_repo_target() {
   printf ']}\n'
 }
 
+# _extract_hdf_status: extract the status of a requirement from HDF target JSON.
+# Uses bash string manipulation (no jq dependency).
+# Args: hdf_json req_id
+# Output: "passed", "failed", "notReviewed", etc.
+_extract_hdf_status() {
+  local json="$1" req_id="$2"
+  local after_id="${json#*\"id\": \""$req_id"\"}"
+  local after_status="${after_id#*\"status\": \"}"
+  printf '%s' "${after_status%%\"*}"
+}
+
+# render_md_csv_row: render a single repo's MD/CSV row from HDF status + cache.
+# HDF determines pass/fail. The classifier cache provides display strings.
+# Args: repo hdf_json cache_file repo_secrets md_file csv_file
+render_md_csv_row() {
+  local repo="$1"
+  local hdf_json="$2"
+  local cache_file="$3"
+  local repo_secrets="$4"
+  local md_file="$5"
+  local csv_file="$6"
+
+  # Read META values from cache
+  local total_wf wf_with_perms has_harden_runner
+  total_wf=$(awk -F'|' '$1 == "META" && $2 == "total_wf" {print $3}' "$cache_file")
+  wf_with_perms=$(awk -F'|' '$1 == "META" && $2 == "wf_with_perms" {print $3}' "$cache_file")
+  has_harden_runner=$(awk -F'|' '$1 == "META" && $2 == "has_harden_runner" {print $3}' "$cache_file")
+
+  [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
+
+  # Read classifier findings from cache into arrays
+  local prt_wfs=() prt_wfs_csv=()
+  local ic_wfs=() ic_wfs_csv=()
+  local unpin_wfs=() unpin_wfs_csv=()
+  local expr_wfs=() expr_wfs_csv=()
+  local wfr_wfs=() wfr_wfs_csv=()
+  local sh_wfs=() sh_wfs_csv=()
+  local dp_wfs=() dp_wfs_csv=()
+  local hs_wfs=() hs_wfs_csv=()
+
+  local tag md_detail csv_detail
+  while IFS='|' read -r tag md_detail csv_detail; do
+    case "$tag" in
+      PRT)
+        prt_wfs+=("$md_detail")
+        prt_wfs_csv+=("$csv_detail")
+        ;;
+      IC)
+        ic_wfs+=("$md_detail")
+        ic_wfs_csv+=("$csv_detail")
+        ;;
+      UNPIN)
+        unpin_wfs+=("$md_detail")
+        unpin_wfs_csv+=("$csv_detail")
+        ;;
+      EXPR)
+        expr_wfs+=("$md_detail")
+        expr_wfs_csv+=("$csv_detail")
+        ;;
+      WFR)
+        wfr_wfs+=("$md_detail")
+        wfr_wfs_csv+=("$csv_detail")
+        ;;
+      SH)
+        sh_wfs+=("$md_detail")
+        sh_wfs_csv+=("$csv_detail")
+        ;;
+      DP)
+        dp_wfs+=("$md_detail")
+        dp_wfs_csv+=("$csv_detail")
+        ;;
+      HS)
+        hs_wfs+=("$md_detail")
+        hs_wfs_csv+=("$csv_detail")
+        ;;
+    esac
+  done < <(grep -v '^META|' "$cache_file")
+
+  # --- Build cells using HDF status as source of truth ---
+
+  # Permissions: special case — needs N/M ratio from META, not a simple pass/fail
+  local perms_cell perms_csv
+  if [ "$wf_with_perms" -eq "$total_wf" ]; then
+    perms_cell="All ($total_wf/$total_wf)"
+    perms_csv="All ($total_wf/$total_wf)"
+  elif [ "$wf_with_perms" -eq 0 ]; then
+    perms_cell="**None** (0/$total_wf)"
+    perms_csv="None (0/$total_wf)"
+  else
+    perms_cell="Partial ($wf_with_perms/$total_wf)"
+    perms_csv="Partial ($wf_with_perms/$total_wf)"
+  fi
+
+  # GHA-002..009: HDF status decides pass/fail; cache provides display detail
+  local prt_cell prt_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-002")" = "passed" ]; then
+    prt_cell="No"
+    prt_csv="No"
+  else
+    prt_cell=$(join_array_cells '<br/>' "${prt_wfs[@]+"${prt_wfs[@]}"}")
+    prt_csv=$(join_array_cells '; ' "${prt_wfs_csv[@]+"${prt_wfs_csv[@]}"}")
+  fi
+
+  local ic_cell ic_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-003")" = "passed" ]; then
+    ic_cell="No"
+    ic_csv="No"
+  else
+    ic_cell=$(join_array_cells '<br/>' "${ic_wfs[@]+"${ic_wfs[@]}"}")
+    ic_csv=$(join_array_cells '; ' "${ic_wfs_csv[@]+"${ic_wfs_csv[@]}"}")
+  fi
+
+  local unpin_cell unpin_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-004")" = "passed" ]; then
+    unpin_cell="No"
+    unpin_csv="No"
+  else
+    unpin_cell=$(join_array_cells '<br/>' "${unpin_wfs[@]+"${unpin_wfs[@]}"}")
+    unpin_csv=$(join_array_cells '; ' "${unpin_wfs_csv[@]+"${unpin_wfs_csv[@]}"}")
+  fi
+
+  local expr_cell expr_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-005")" = "passed" ]; then
+    expr_cell="No"
+    expr_csv="No"
+  else
+    expr_cell=$(join_array_cells '<br/>' "${expr_wfs[@]+"${expr_wfs[@]}"}")
+    expr_csv=$(join_array_cells '; ' "${expr_wfs_csv[@]+"${expr_wfs_csv[@]}"}")
+  fi
+
+  local wfr_cell wfr_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-006")" = "passed" ]; then
+    wfr_cell="No"
+    wfr_csv="No"
+  else
+    wfr_cell=$(join_array_cells '<br/>' "${wfr_wfs[@]+"${wfr_wfs[@]}"}")
+    wfr_csv=$(join_array_cells '; ' "${wfr_wfs_csv[@]+"${wfr_wfs_csv[@]}"}")
+  fi
+
+  local sh_cell sh_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-007")" = "passed" ]; then
+    sh_cell="No"
+    sh_csv="No"
+  else
+    sh_cell=$(join_array_cells '<br/>' "${sh_wfs[@]+"${sh_wfs[@]}"}")
+    sh_csv=$(join_array_cells '; ' "${sh_wfs_csv[@]+"${sh_wfs_csv[@]}"}")
+  fi
+
+  local dp_cell dp_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-008")" = "passed" ]; then
+    dp_cell="No"
+    dp_csv="No"
+  else
+    dp_cell=$(join_array_cells '<br/>' "${dp_wfs[@]+"${dp_wfs[@]}"}")
+    dp_csv=$(join_array_cells '; ' "${dp_wfs_csv[@]+"${dp_wfs_csv[@]}"}")
+  fi
+
+  local hs_cell hs_csv
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-009")" = "passed" ]; then
+    hs_cell="No"
+    hs_csv="No"
+  else
+    hs_cell=$(join_array_cells '<br/>' "${hs_wfs[@]+"${hs_wfs[@]}"}")
+    hs_csv=$(join_array_cells '; ' "${hs_wfs_csv[@]+"${hs_wfs_csv[@]}"}")
+  fi
+
+  # Harden-runner: HDF status passed→"Yes", failed→"No"
+  local hr_cell
+  if [ "$(_extract_hdf_status "$hdf_json" "GHA-010")" = "passed" ]; then
+    hr_cell="Yes"
+  else
+    hr_cell="No"
+  fi
+
+  # Write directly to output files
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${hs_cell}|${hr_cell}|${repo_secrets}" >>"$md_file"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${hs_csv}|${hr_cell}|${repo_secrets}" >>"$csv_file"
+}
+
 # build_hdf_org_target: produce an HDF v2 target JSON object for org-level checks.
 # Uses the same YAML-driven loop as build_hdf_repo_target, filtered for org_ classifiers.
 # Args: org default_wf_perm can_approve_prs allowed_actions [org_secrets_file]
@@ -1333,8 +1376,26 @@ for repo in "${REPOS[@]}"; do
   : >"$CLASSIFIER_CACHE_FILE"
   run_repo_classifiers "$repo_dir" "$CLASSIFIER_CACHE_FILE" || continue
 
-  analyze_repo "$repo" "$repo_dir" "$TABLE_ROWS_FILE" "$TABLE_ROWS_CSV_FILE" "$CLASSIFIER_CACHE_FILE"
-  build_hdf_repo_target "$repo" "$repo_dir" "$CLASSIFIER_CACHE_FILE" >>"$HDF_REPO_TARGETS_FILE" || true
+  # HDF is the source of truth for pass/fail status
+  hdf_target_json=$(build_hdf_repo_target "$repo" "$repo_dir" "$CLASSIFIER_CACHE_FILE") || continue
+  printf '%s\n' "$hdf_target_json" >>"$HDF_REPO_TARGETS_FILE"
+
+  # Per-repo secrets (inventory metadata, not an HDF requirement)
+  repo_secrets=""
+  secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
+    warn "Could not fetch secrets for $repo (may lack repo admin access)."
+    secret_names=""
+  }
+  if [ -z "$secret_names" ]; then
+    repo_secrets="(none)"
+  else
+    repo_secrets=$(paste -sd', ' - <<<"$secret_names")
+  fi
+
+  # Render MD/CSV from HDF status + cache display strings
+  render_md_csv_row "$repo" "$hdf_target_json" "$CLASSIFIER_CACHE_FILE" \
+    "$repo_secrets" "$TABLE_ROWS_FILE" "$TABLE_ROWS_CSV_FILE"
+
   progress "$repo"
 done
 

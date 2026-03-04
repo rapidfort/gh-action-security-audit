@@ -49,11 +49,11 @@ setup() {
   assert_output --partial 'warn'
 }
 
-@test "analyze_repo function is defined and called in Phase 2" {
-  run grep -c 'analyze_repo()' "$SCRIPT"
+@test "render_md_csv_row function is defined and called in Phase 2" {
+  run grep -c 'render_md_csv_row()' "$SCRIPT"
   assert_success
   # Should appear at least once (the definition)
-  run grep 'analyze_repo ' "$SCRIPT"
+  run grep 'render_md_csv_row ' "$SCRIPT"
   assert_success
 }
 
@@ -266,8 +266,8 @@ _run_require_arg() {
   [ "$count" -eq 1 ]
 }
 
-@test "analyze_repo writes directly to files (no head/tail split)" {
-  # 1rx: analyze_repo must not output to stdout for head/tail parsing
+@test "render_md_csv_row writes directly to files (no head/tail split)" {
+  # 1rx: render_md_csv_row must not output to stdout for head/tail parsing
   run grep -E 'head -1.*TABLE_ROWS|tail -1.*TABLE_ROWS' "$SCRIPT"
   assert_failure
 }

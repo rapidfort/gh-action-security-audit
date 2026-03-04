@@ -246,7 +246,7 @@ _run_classifier() {
 }
 
 # =============================================================================
-# analyze_repo() integration tests
+# render_md_csv_row() integration tests (HDF pipeline)
 # =============================================================================
 
 # Helper: extract functions from script for testing
@@ -257,10 +257,12 @@ _script_preamble() {
     gh() { echo ''; return 0; }
     export -f gh
 PREAMBLE
-  # Extract helper and classify functions plus run_repo_classifiers and analyze_repo
+  # Extract helper and classify functions
   sed -n '/^extract_on_triggers()/,/^}/p' "$SCRIPT"
   sed -n '/^find_workflow_files()/,/^}/p' "$SCRIPT"
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
+  sed -n '/^json_escape()/,/^}/p' "$SCRIPT"
+  sed -n '/^emit_hdf_requirement()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_unpinned()/,/^}/p' "$SCRIPT"
@@ -270,10 +272,23 @@ PREAMBLE
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
   sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
-  sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
+  # HDF result functions and HDF pipeline
+  sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_002()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_003()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_004()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_005()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_006()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_007()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_008()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_009()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_010()/,/^}/p' "$SCRIPT"
+  sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
+  sed -n '/^_extract_hdf_status()/,/^}/p' "$SCRIPT"
+  sed -n '/^render_md_csv_row()/,/^}/p' "$SCRIPT"
 }
 
-_run_analyze_repo() {
+_run_render_pipeline() {
   local repo="$1"
   local repo_dir="$2"
   local md_file csv_file cache_file
@@ -284,8 +299,11 @@ _run_analyze_repo() {
     $(_script_preamble)
     ORG='test-org'
     WORKFLOWS_DIR='$BATS_TEST_WORKFLOW_DIR'
+    HDF_PROFILE_DIR='${PROJECT_ROOT}/hdf-profile'
     run_repo_classifiers '$repo_dir' '$cache_file' || exit 1
-    analyze_repo '$repo' '$repo_dir' '$md_file' '$csv_file' '$cache_file'
+    hdf_json=\$(build_hdf_repo_target '$repo' '$repo_dir' '$cache_file') || exit 1
+    render_md_csv_row '$repo' \"\$hdf_json\" '$cache_file' \
+      '(none)' '$md_file' '$csv_file'
   "
   local rc=$?
   # Output md row then csv row (same format tests expect)
@@ -297,68 +315,68 @@ _run_analyze_repo() {
   return $rc
 }
 
-@test "analyze_repo: permissions-explicit workflow reports All permissions" {
+@test "render_md_csv_row: permissions-explicit workflow reports All permissions" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/permissions-explicit.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # First line is markdown row
   assert_line --index 0 --partial "All (1/1)"
 }
 
-@test "analyze_repo: permissions-none workflow reports None permissions" {
+@test "render_md_csv_row: permissions-none workflow reports None permissions" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/permissions-none.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "**None** (0/1)"
 }
 
-@test "analyze_repo: prt-checkout-no-guard reports checkout+exec, no guard" {
+@test "render_md_csv_row: prt-checkout-no-guard reports checkout+exec, no guard" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/prt-checkout-no-guard.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "checkout+exec, no guard"
 }
 
-@test "analyze_repo: issue-comment-with-gate reports has author_association" {
+@test "render_md_csv_row: issue-comment-with-gate reports has author_association" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/issue-comment-with-gate.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "has author_association"
 }
 
-@test "analyze_repo: issue-comment-author-in-comment NOT flagged as gated" {
+@test "render_md_csv_row: issue-comment-author-in-comment NOT flagged as gated" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/issue-comment-author-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "no author gate"
 }
 
-@test "analyze_repo: prt-checkout-commented-out classified as API-only" {
+@test "render_md_csv_row: prt-checkout-commented-out classified as API-only" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/prt-checkout-commented-out.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "API-only"
   refute_output --partial "checkout+exec"
   refute_output --partial "checkout, no fork ref"
 }
 
-@test "analyze_repo: prt-in-comment does NOT report pull_request_target" {
+@test "render_md_csv_row: prt-in-comment does NOT report pull_request_target" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/prt-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # PRT column should say "No" (third pipe-field)
   refute_output --partial "pull_request_target"
@@ -367,22 +385,22 @@ _run_analyze_repo() {
   assert_line --index 0 --partial "|No|"
 }
 
-@test "analyze_repo: ic-in-comment does NOT report issue_comment" {
+@test "render_md_csv_row: ic-in-comment does NOT report issue_comment" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/ic-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # IC column should say "No" (fourth pipe-field)
   refute_output --partial "issue_comment"
   refute_output --partial "author"
 }
 
-@test "analyze_repo: empty directory returns failure" {
+@test "render_md_csv_row: empty directory returns failure" {
   setup_fixture_dir "test-org" "empty-repo"
   # No files copied — empty repo dir
 
-  run _run_analyze_repo "empty-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/empty-repo"
+  run _run_render_pipeline "empty-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/empty-repo"
   assert_failure
 }
 
@@ -462,50 +480,50 @@ _run_classify_unpinned() {
   assert_output ""
 }
 
-# --- analyze_repo integration tests for unpinned actions ---
+# --- render_md_csv_row integration tests for unpinned actions ---
 
-@test "analyze_repo: unpinned-actions reports 0/3 pinned in unpinned column" {
+@test "render_md_csv_row: unpinned-actions reports 0/3 pinned in unpinned column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/unpinned-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "0/3 pinned"
 }
 
-@test "analyze_repo: pinned-actions reports 3/3 pinned in unpinned column" {
+@test "render_md_csv_row: pinned-actions reports 3/3 pinned in unpinned column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/pinned-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "3/3 pinned"
 }
 
-@test "analyze_repo: mixed-pinning reports 2/4 pinned" {
+@test "render_md_csv_row: mixed-pinning reports 2/4 pinned" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/mixed-pinning.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "2/4 pinned"
 }
 
-@test "analyze_repo: benign workflow reports unpinned action" {
+@test "render_md_csv_row: benign workflow reports unpinned action" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # benign-workflow.yml has uses: actions/checkout@v4 (unpinned)
   assert_line --index 0 --partial "0/1 pinned"
 }
 
-@test "analyze_repo: workflow with no uses: lines has No in unpinned column" {
+@test "render_md_csv_row: workflow with no uses: lines has No in unpinned column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/issue-comment-no-gate.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # issue-comment-no-gate.yml has no uses: lines → unpinned column = No
   local md_row
@@ -627,22 +645,22 @@ _run_classify_expr_injection() {
   assert_output ""
 }
 
-# --- analyze_repo integration tests for expression injection ---
+# --- render_md_csv_row integration tests for expression injection ---
 
-@test "analyze_repo: expr-injection-pr-title reports expression injection" {
+@test "render_md_csv_row: expr-injection-pr-title reports expression injection" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/expr-injection-pr-title.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "pull_request.title"
 }
 
-@test "analyze_repo: expr-injection-safe has No in injection column" {
+@test "render_md_csv_row: expr-injection-safe has No in injection column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/expr-injection-safe.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # Expr injection column (7th field) should be No
   local md_row
@@ -694,11 +712,11 @@ _run_classify_wfr() {
   assert_output ""
 }
 
-@test "analyze_repo: workflow-run-artifact reports in wfr column" {
+@test "render_md_csv_row: workflow-run-artifact reports in wfr column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/workflow-run-artifact.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "download-artifact"
 }
@@ -760,20 +778,20 @@ _run_classify_self_hosted() {
   assert_output ""
 }
 
-@test "analyze_repo: self-hosted runner reported in output" {
+@test "render_md_csv_row: self-hosted runner reported in output" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/self-hosted-runner.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "self-hosted"
 }
 
-@test "analyze_repo: github-hosted runner has No in self-hosted column" {
+@test "render_md_csv_row: github-hosted runner has No in self-hosted column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # Self-hosted column should be "No"
   local md_row
@@ -825,20 +843,20 @@ _run_classify_dangerous_perms() {
   assert_output ""
 }
 
-@test "analyze_repo: dangerous-perms-write-all reports write-all" {
+@test "render_md_csv_row: dangerous-perms-write-all reports write-all" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/dangerous-perms-write-all.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "write-all"
 }
 
-@test "analyze_repo: safe-perms-read has No in dangerous perms column" {
+@test "render_md_csv_row: safe-perms-read has No in dangerous perms column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/safe-perms-read.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # Dangerous perms column should be "No"
   local md_row
@@ -906,29 +924,29 @@ _run_classify_dangerous_perms() {
   assert_failure
 }
 
-@test "analyze_repo: hardcoded ghp_ token reported in output" {
+@test "render_md_csv_row: hardcoded ghp_ token reported in output" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/hardcoded-token.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_output --partial "ghp_"
 }
 
-@test "analyze_repo: hardcoded AKIA key reported in output" {
+@test "render_md_csv_row: hardcoded AKIA key reported in output" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/hardcoded-aws-key.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_output --partial "AKIA"
 }
 
-@test "analyze_repo: commented-out token has No in hardcoded secrets column" {
+@test "render_md_csv_row: commented-out token has No in hardcoded secrets column" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/hardcoded-token-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # Field 10 (hardcoded secrets) should be No
   local md_row
@@ -938,20 +956,20 @@ _run_classify_dangerous_perms() {
   [ "$hs_col" = "No" ]
 }
 
-@test "analyze_repo: harden-runner workflow reports adoption" {
+@test "render_md_csv_row: harden-runner workflow reports adoption" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/harden-runner-used.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_output --partial "harden-runner"
 }
 
-@test "analyze_repo: benign workflow has No in hardcoded secrets and harden-runner columns" {
+@test "render_md_csv_row: benign workflow has No in hardcoded secrets and harden-runner columns" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   local md_row
   md_row=$(echo "$output" | head -1)
@@ -1018,11 +1036,11 @@ YAML
   refute_output --partial "workflow_run"
 }
 
-@test "analyze_repo: trigger keywords in run: string NOT flagged" {
+@test "render_md_csv_row: trigger keywords in run: string NOT flagged" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/trigger-keyword-in-run.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   # PRT, IC, and WFR columns should all be "No"
   refute_output --partial "pull_request_target"
@@ -1033,11 +1051,11 @@ YAML
   refute_output --partial "author"
 }
 
-@test "analyze_repo: real PRT trigger still detected after on: extraction" {
+@test "render_md_csv_row: real PRT trigger still detected after on: extraction" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/prt-api-only.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
-  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  run _run_render_pipeline "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_output --partial "API-only"
 }

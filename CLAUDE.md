@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Vision
+
+A comprehensive GitHub Actions security scanner, distributed as a **`gh` CLI extension** (`gh actions-audit`), that evolves with the threat landscape and community best practices. The tool:
+
+- **Detects real-world attack patterns** — pwn requests, expression injection, supply chain poisoning, artifact trust violations, and more — mapped to [OWASP CI/CD Top 10](https://owasp.org/www-project-top-10-ci-cd-security-risks/) risk categories
+- **Uses a structured JSONL intermediate format** — one JSON object per repo, decoupling analysis from rendering. All output formats (markdown, CSV, JSONL, and potentially [HDF v2](https://saf.mitre.org)) are rendered from this single source of truth
+- **Maps findings to compliance controls** — CCI identifiers with transitive mapping to NIST SP 800-53 controls, enabling integration with GRC tooling like [MITRE Heimdall](https://saf.mitre.org)
+- **Follows `gh` CLI conventions** — `--json`, `--jq`, proper exit codes, `NO_COLOR` support, installable via `gh extension install`
+- **Stays grep-based and dependency-light** — bash 3.2+, `gh` CLI, standard Unix tools. No YAML parser, no runtime beyond what ships with macOS/Linux
+
 ## Code Quality Rules
 
 - **We own this code. There is no such thing as a "pre-existing" issue.** Every warning, lint finding, or tool error must be fixed immediately. Never dismiss, defer, or label something as "expected."
@@ -12,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. It produces markdown and optional CSV reports. Runtime dependencies: `bash` (3.2+), `gh` CLI, and standard Unix tools.
+A single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. Produces markdown, CSV, and (soon) JSONL reports with 12 detection checks across per-repo and org-level analysis. Runtime dependencies: `bash` (3.2+), `gh` CLI, and standard Unix tools. Future: packaged as a `gh` CLI extension.
 
 ## Running the Script
 
@@ -31,19 +41,20 @@ The script requires `admin:org` scope and repo admin access via `gh auth`.
 
 ## Architecture
 
-The entire tool is a single bash script (`gh-actions-audit.sh`, ~700 lines) organized into five sequential phases:
+The entire tool is a single bash script (`gh-actions-audit.sh`, ~1000 lines) organized into five sequential phases:
 
 1. **Phase 1 (Download)** — Enumerates org repos via `gh repo list`, downloads `.github/workflows/*.yml` files via GitHub API. Skipped with `--local`.
-2. **Phase 2 (Per-repo analysis)** — Scans each workflow file for: explicit `permissions:` blocks, `pull_request_target` triggers (sub-classified by risk: API-only, checkout+guard, checkout+exec/no guard), `issue_comment` triggers (with/without author gates), and repo-level secret names.
-3. **Phase 3 (Org secrets)** — Lists org-level secrets, maps each to repos that reference it in workflows via grep, generates `gh secret set` remediation commands for overly broad secrets.
+2. **Phase 2 (Per-repo analysis)** — `analyze_repo()` scans each workflow file through 10 classify functions: `classify_prt()`, `classify_ic()`, `classify_unpinned()`, `classify_expr_injection()`, `classify_wfr()`, `classify_self_hosted()`, `classify_dangerous_perms()`, `classify_hardcoded_secrets()`, plus permissions and harden-runner checks. Trigger detection uses `extract_on_triggers()` to avoid false positives.
+3. **Phase 3 (Org secrets)** — Lists org-level secrets, maps each to repos via single-pass `SECRET_MAP_FILE`, generates `gh secret set` remediation commands.
 4. **Phase 4 (Org settings)** — Fetches default workflow token permissions, PR approval policy, allowed actions policy via `gh api --jq`.
-5. **Phase 5 (Report)** — Writes markdown report (and optional CSV) using heredocs and pipe-delimited temp files.
+5. **Phase 5 (Report)** — Writes markdown report (and optional CSV) with 12-field per-repo table and summary statistics. Soon: JSONL intermediate format.
 
 Key implementation details:
 - Workflow analysis is entirely grep-based heuristics (no YAML parser)
-- Temp files (`mktemp`) store intermediate table rows; cleaned up at end
+- All classify functions use `wf_uncommented` (comment-stripped content) to prevent false positives
+- Temp files (`mktemp`) store intermediate table rows; cleaned up via `trap EXIT`
 - Progress output uses ANSI colors (auto-disabled when not a TTY)
-- Downloaded workflows are cached under `/tmp/gh-actions-audit-<ORG>-<timestamp>/workflows/`
+- Downloaded workflows are cached under `/tmp/gh-actions-audit-<ORG>-<XXXXXX>/workflows/`
 
 ## Testing
 
@@ -65,6 +76,6 @@ Test structure:
 
 Tests prefixed with `BUG:` document known bugs (they pass, proving the bug exists). When fixing a bug, invert the assertion.
 
-## Known Issue
+## Research Reports
 
-The LICENSE file is MIT but README.md states Apache-2.0. These should be reconciled.
+Agent research reports are saved in `.beads/research-*.md` for reference across sessions. Current reports cover: security detection gaps (OWASP-mapped), GitHub API schema verification, and `gh` CLI extension packaging conventions.

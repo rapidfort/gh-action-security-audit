@@ -275,6 +275,12 @@ PREAMBLE
   sed -n '/^classify_env_injection()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_deprecated_commands()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_known_vulnerable()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_unpinned_third_party()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_always_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_artifact_trust()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_missing_environment()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_cache_poisoning()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_static_credentials()/,/^}/p' "$SCRIPT"
   sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
   # HDF result functions and HDF pipeline
   sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
@@ -293,7 +299,13 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_016()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_019()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_020()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_021()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_022()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_023()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_024()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_025()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_026()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
   sed -n '/^_extract_hdf_status()/,/^}/p' "$SCRIPT"
   sed -n '/^render_md_csv_row()/,/^}/p' "$SCRIPT"
@@ -1333,6 +1345,128 @@ _run_repo_classifiers() {
   refute_output --partial "EI|"
   refute_output --partial "DC|"
   refute_output --partial "KV|"
+}
+
+# =============================================================================
+# Unpinned third-party actions (GHA-020)
+# =============================================================================
+
+@test "classify_unpinned_third_party: detects third-party unpinned" {
+  run _run_classifier classify_unpinned_third_party "$FIXTURES_DIR/workflows/unpinned-third-party.yml"
+  assert_success
+  assert_output --partial "third-party unpinned"
+}
+
+@test "classify_unpinned_third_party: benign (first-party only) returns empty" {
+  run _run_classifier classify_unpinned_third_party "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_unpinned_third_party: pinned actions returns empty" {
+  run _run_classifier classify_unpinned_third_party "$FIXTURES_DIR/workflows/pinned-actions.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# always()/continue-on-error + secrets (GHA-022)
+# =============================================================================
+
+@test "classify_always_secrets: detects always() + secrets" {
+  run _run_classifier classify_always_secrets "$FIXTURES_DIR/workflows/always-secrets.yml"
+  assert_success
+  assert_output --partial "always()"
+  assert_output --partial "secrets"
+}
+
+@test "classify_always_secrets: detects continue-on-error + secrets" {
+  run _run_classifier classify_always_secrets "$FIXTURES_DIR/workflows/continue-on-error-secrets.yml"
+  assert_success
+  assert_output --partial "continue-on-error"
+  assert_output --partial "secrets"
+}
+
+@test "classify_always_secrets: benign workflow returns empty" {
+  run _run_classifier classify_always_secrets "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Artifact trust (GHA-023)
+# =============================================================================
+
+@test "classify_artifact_trust: detects download-artifact" {
+  run _run_classifier classify_artifact_trust "$FIXTURES_DIR/workflows/download-artifact.yml"
+  assert_success
+  assert_output --partial "download-artifact"
+}
+
+@test "classify_artifact_trust: benign workflow returns empty" {
+  run _run_classifier classify_artifact_trust "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Deployment without environment (GHA-024)
+# =============================================================================
+
+@test "classify_missing_environment: detects deploy without environment" {
+  run _run_classifier classify_missing_environment "$FIXTURES_DIR/workflows/deploy-no-environment.yml"
+  assert_success
+  assert_output --partial "deploy without environment"
+}
+
+@test "classify_missing_environment: deploy with environment returns empty" {
+  run _run_classifier classify_missing_environment "$FIXTURES_DIR/workflows/deploy-with-environment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_missing_environment: benign workflow returns empty" {
+  run _run_classifier classify_missing_environment "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Cache poisoning (GHA-025)
+# =============================================================================
+
+@test "classify_cache_poisoning: detects actions/cache" {
+  run _run_classifier classify_cache_poisoning "$FIXTURES_DIR/workflows/cache-usage.yml"
+  assert_success
+  assert_output --partial "actions/cache"
+}
+
+@test "classify_cache_poisoning: benign workflow returns empty" {
+  run _run_classifier classify_cache_poisoning "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Static credentials vs OIDC (GHA-026)
+# =============================================================================
+
+@test "classify_static_credentials: detects static AWS credentials" {
+  run _run_classifier classify_static_credentials "$FIXTURES_DIR/workflows/static-credentials.yml"
+  assert_success
+  assert_output --partial "static cloud credentials"
+}
+
+@test "classify_static_credentials: OIDC with id-token:write returns empty" {
+  run _run_classifier classify_static_credentials "$FIXTURES_DIR/workflows/oidc-credentials.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_static_credentials: benign workflow returns empty" {
+  run _run_classifier classify_static_credentials "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
 }
 
 # =============================================================================

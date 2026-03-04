@@ -549,7 +549,7 @@
     - SI-7 (1)
   owasp_cicd: CICD-SEC-3
   classifier: classify_unpinned
-  implemented: false
+  implemented: true
   card: "06o"
 
 - id: GHA-021
@@ -602,7 +602,7 @@
     - AC-3
   owasp_cicd: CICD-SEC-4
   classifier: classify_always_secrets
-  implemented: false
+  implemented: true
   card: dup
 
 - id: GHA-023
@@ -628,7 +628,7 @@
     - SI-7 (1)
   owasp_cicd: CICD-SEC-4
   classifier: classify_artifact_trust
-  implemented: false
+  implemented: true
   card: dz7
 
 - id: GHA-024
@@ -655,7 +655,7 @@
     - CM-6
   owasp_cicd: CICD-SEC-1
   classifier: classify_missing_environment
-  implemented: false
+  implemented: true
   card: cta
 
 - id: GHA-025
@@ -680,7 +680,7 @@
     - SI-7 (1)
   owasp_cicd: CICD-SEC-4
   classifier: classify_cache_poisoning
-  implemented: false
+  implemented: true
   card: lfv
 
 - id: GHA-026
@@ -710,7 +710,7 @@
     - IA-5 (1)
   owasp_cicd: CICD-SEC-6
   classifier: classify_static_credentials
-  implemented: false
+  implemented: true
   card: wzi
 
 - id: GHA-027

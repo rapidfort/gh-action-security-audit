@@ -1,0 +1,8 @@
+name: Deploy without environment
+on: push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker push myapp:latest

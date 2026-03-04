@@ -208,6 +208,12 @@ PREAMBLE
   sed -n '/^classify_env_injection()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_deprecated_commands()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_known_vulnerable()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_unpinned_third_party()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_always_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_artifact_trust()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_missing_environment()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_cache_poisoning()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_static_credentials()/,/^}/p' "$SCRIPT"
   sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_002()/,/^}/p' "$SCRIPT"
@@ -228,7 +234,13 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_016()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_019()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_020()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_021()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_022()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_023()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_024()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_025()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_026()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
 }
 
@@ -556,24 +568,19 @@ _run_hdf_repo_target() {
 
   run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
-  # 17 implemented per-repo checks
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-021; do
-    assert_output --partial "\"$id\""
-  done
-  # 6 unimplemented per-repo checks (notReviewed)
-  for id in GHA-020 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
+  # All 23 per-repo checks implemented
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-020 GHA-021 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
     assert_output --partial "\"$id\""
   done
 }
 
-@test "build_hdf_repo_target: unimplemented requirements have notReviewed status" {
+@test "build_hdf_repo_target: all per-repo requirements are implemented (no notReviewed)" {
   setup_fixture_dir "test-org" "test-repo"
   cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
 
   run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
-  assert_output --partial '"notReviewed"'
-  assert_output --partial "Detection not yet implemented"
+  refute_output --partial "Detection not yet implemented"
 }
 
 @test "build_hdf_repo_target: org-level requirements NOT included" {
@@ -759,7 +766,7 @@ _run_hdf_org_target() {
   run _run_hdf_org_target "test-org" "read" "false" "selected"
   assert_success
   # Per-repo IDs must NOT appear in org target
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-021; do
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-020 GHA-021 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
     refute_output --partial "\"$id\""
   done
 }

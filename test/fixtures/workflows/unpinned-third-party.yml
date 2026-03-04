@@ -1,0 +1,9 @@
+name: Uses unpinned third-party action
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: some-org/custom-action@v1

@@ -754,6 +754,119 @@ classify_known_vulnerable() {
   echo "$wf_name (**${found_list}**)|$wf_name (${found_list})"
 }
 
+# --- classify_unpinned_third_party: distinguish first-party vs third-party unpinned ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if no third-party unpinned actions)
+# First-party: actions/*, github/* — lower risk when unpinned
+classify_unpinned_third_party() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local uses_lines
+  uses_lines=$(grep -E 'uses:.*@' <<<"$wf_uncommented" || true)
+  [ -z "$uses_lines" ] && return 0
+
+  local third_party=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # Skip SHA-pinned
+    echo "$line" | grep -qE '@[0-9a-f]{40}' && continue
+    # Skip first-party (actions/*, github/*)
+    echo "$line" | grep -qE 'uses:\s*(actions|github)/' && continue
+    third_party=$((third_party + 1))
+  done <<<"$uses_lines"
+
+  [ "$third_party" -eq 0 ] && return 0
+  echo "$wf_name (**$third_party third-party unpinned**)|$wf_name ($third_party third-party unpinned)"
+}
+
+# --- classify_always_secrets: detect always()/continue-on-error + secrets ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+classify_always_secrets() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local has_always=0 has_continue=0 has_secrets=0
+  if grep -qE 'if:.*always\(\)' <<<"$wf_uncommented"; then
+    has_always=1
+  fi
+  if grep -qE 'continue-on-error:\s*true' <<<"$wf_uncommented"; then
+    has_continue=1
+  fi
+  if grep -qE 'secrets\.' <<<"$wf_uncommented"; then
+    has_secrets=1
+  fi
+
+  [ "$has_secrets" -eq 0 ] && return 0
+  [ "$has_always" -eq 0 ] && [ "$has_continue" -eq 0 ] && return 0
+
+  local patterns=()
+  [ "$has_always" -eq 1 ] && patterns+=("always()")
+  [ "$has_continue" -eq 1 ] && patterns+=("continue-on-error")
+
+  local pattern_list
+  pattern_list=$(printf '%s, ' "${patterns[@]}")
+  pattern_list="${pattern_list%, }"
+
+  echo "$wf_name (**${pattern_list} + secrets**)|$wf_name (${pattern_list} + secrets)"
+}
+
+# --- classify_artifact_trust: detect download-artifact without validation ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+classify_artifact_trust() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  if grep -qE 'uses:.*download-artifact' <<<"$wf_uncommented"; then
+    echo "$wf_name (**download-artifact**)|$wf_name (download-artifact)"
+  fi
+}
+
+# --- classify_missing_environment: detect deployment without environment protection ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Deployment patterns: docker push, aws deploy, kubectl apply, terraform apply, helm upgrade
+classify_missing_environment() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local has_deploy=0
+  if grep -qEi 'docker\s+push|aws\s+deploy|kubectl\s+apply|terraform\s+apply|helm\s+upgrade|gcloud\s+.*deploy' <<<"$wf_uncommented"; then
+    has_deploy=1
+  fi
+  [ "$has_deploy" -eq 0 ] && return 0
+
+  if grep -q 'environment:' <<<"$wf_uncommented"; then
+    return 0
+  fi
+
+  echo "$wf_name (**deploy without environment**)|$wf_name (deploy without environment)"
+}
+
+# --- classify_cache_poisoning: detect cache usage in fork-triggered workflows ---
+# Args: wf_name wf_content wf_uncommented wf_triggers
+# Outputs: md_detail|csv_detail (or empty if none found)
+classify_cache_poisoning() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  if ! grep -qE 'uses:.*actions/cache' <<<"$wf_uncommented"; then
+    return 0
+  fi
+  echo "$wf_name (**actions/cache**)|$wf_name (actions/cache)"
+}
+
+# --- classify_static_credentials: detect static cloud credentials vs OIDC ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Checks for AWS_ACCESS_KEY_ID, AZURE_CREDENTIALS, GCP_SA_KEY without id-token: write
+classify_static_credentials() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local has_static=0
+  if grep -qE 'AWS_ACCESS_KEY_ID|AZURE_CREDENTIALS|GCP_SA_KEY|GOOGLE_APPLICATION_CREDENTIALS' <<<"$wf_uncommented"; then
+    has_static=1
+  fi
+  [ "$has_static" -eq 0 ] && return 0
+
+  if grep -qE 'id-token:\s*write' <<<"$wf_uncommented"; then
+    return 0
+  fi
+
+  echo "$wf_name (**static cloud credentials**)|$wf_name (static cloud credentials)"
+}
+
 # --- run_repo_classifiers: run all per-repo classifiers on a repo's workflows ---
 # Writes results to a cache file for consumption by build_hdf_repo_target and render_md_csv_row.
 # Args: repo_dir cache_file
@@ -871,6 +984,48 @@ run_repo_classifiers() {
     kv_result=$(classify_known_vulnerable "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$kv_result" ]; then
       echo "KV|${kv_result}" >>"$cache_file"
+    fi
+
+    # --- Unpinned third-party actions ---
+    local utp_result
+    utp_result=$(classify_unpinned_third_party "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$utp_result" ]; then
+      echo "UTP|${utp_result}" >>"$cache_file"
+    fi
+
+    # --- always()/continue-on-error + secrets ---
+    local as_result
+    as_result=$(classify_always_secrets "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$as_result" ]; then
+      echo "AS|${as_result}" >>"$cache_file"
+    fi
+
+    # --- Artifact trust ---
+    local at_result
+    at_result=$(classify_artifact_trust "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$at_result" ]; then
+      echo "AT|${at_result}" >>"$cache_file"
+    fi
+
+    # --- Missing deployment environment ---
+    local me_result
+    me_result=$(classify_missing_environment "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$me_result" ]; then
+      echo "ME|${me_result}" >>"$cache_file"
+    fi
+
+    # --- Cache poisoning ---
+    local cp_result
+    cp_result=$(classify_cache_poisoning "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$cp_result" ]; then
+      echo "CP|${cp_result}" >>"$cache_file"
+    fi
+
+    # --- Static cloud credentials ---
+    local sc_result
+    sc_result=$(classify_static_credentials "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$sc_result" ]; then
+      echo "SC|${sc_result}" >>"$cache_file"
     fi
 
     # --- Harden-runner ---
@@ -1084,6 +1239,72 @@ _hdf_result_GHA_021() {
   fi
 }
 
+# GHA-020: Unpinned third-party actions
+_hdf_result_GHA_020() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No unpinned third-party actions found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Unpinned third-party action findings|%s' "$detail"
+  fi
+}
+
+# GHA-022: always()/continue-on-error + secrets
+_hdf_result_GHA_022() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No always()/continue-on-error combined with secrets found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|always()/continue-on-error + secrets findings|%s' "$detail"
+  fi
+}
+
+# GHA-023: Artifact trust validation
+_hdf_result_GHA_023() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No unvalidated artifact downloads found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Artifact trust findings|%s' "$detail"
+  fi
+}
+
+# GHA-024: Missing deployment environment
+_hdf_result_GHA_024() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No deployments without environment protection found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Deployment without environment protection|%s' "$detail"
+  fi
+}
+
+# GHA-025: Fork-triggered cache poisoning
+_hdf_result_GHA_025() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No cache usage found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Cache poisoning risk|%s' "$detail"
+  fi
+}
+
+# GHA-026: OIDC federation vs static credentials
+_hdf_result_GHA_026() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No static cloud credentials without OIDC found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Static cloud credential findings|%s' "$detail"
+  fi
+}
+
 # GHA-011: Org default workflow permissions
 # Args: $1=default_wf_perm (e.g., "read" or "write")
 _hdf_result_GHA_011() {
@@ -1152,6 +1373,8 @@ build_hdf_repo_target() {
   local prt_findings=() ic_findings=() unpin_findings=() expr_findings=()
   local wfr_findings=() sh_findings=() dp_findings=() hs_findings=()
   local si_findings=() ei_findings=() dc_findings=() kv_findings=()
+  local utp_findings=() as_findings=() at_findings=()
+  local me_findings=() cp_findings=() sc_findings=()
 
   local tag md_detail csv_detail
   while IFS='|' read -r tag md_detail csv_detail; do
@@ -1168,6 +1391,12 @@ build_hdf_repo_target() {
       EI) ei_findings+=("$md_detail") ;;
       DC) dc_findings+=("$md_detail") ;;
       KV) kv_findings+=("$md_detail") ;;
+      UTP) utp_findings+=("$md_detail") ;;
+      AS) as_findings+=("$md_detail") ;;
+      AT) at_findings+=("$md_detail") ;;
+      ME) me_findings+=("$md_detail") ;;
+      CP) cp_findings+=("$md_detail") ;;
+      SC) sc_findings+=("$md_detail") ;;
     esac
   done < <(grep -v '^META|' "$cache_file")
 
@@ -1198,7 +1427,13 @@ build_hdf_repo_target() {
           GHA-018) result=$(_hdf_result_GHA_018 "${kv_findings[@]}") ;;
           GHA-016) result=$(_hdf_result_GHA_016 "${expr_findings[@]}") ;;
           GHA-019) result=$(_hdf_result_GHA_019 "${expr_findings[@]}") ;;
+          GHA-020) result=$(_hdf_result_GHA_020 "${utp_findings[@]}") ;;
           GHA-021) result=$(_hdf_result_GHA_021 "${prt_findings[@]}") ;;
+          GHA-022) result=$(_hdf_result_GHA_022 "${as_findings[@]}") ;;
+          GHA-023) result=$(_hdf_result_GHA_023 "${at_findings[@]}") ;;
+          GHA-024) result=$(_hdf_result_GHA_024 "${me_findings[@]}") ;;
+          GHA-025) result=$(_hdf_result_GHA_025 "${cp_findings[@]}") ;;
+          GHA-026) result=$(_hdf_result_GHA_026 "${sc_findings[@]}") ;;
           *) result="notReviewed|Detection not yet implemented" ;;
         esac
         IFS='|' read -r status code_desc message <<<"$result"

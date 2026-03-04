@@ -261,6 +261,7 @@ PREAMBLE
   sed -n '/^extract_on_triggers()/,/^}/p' "$SCRIPT"
   sed -n '/^find_workflow_files()/,/^}/p' "$SCRIPT"
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
+  sed -n '/^strip_md()/,/^}/p' "$SCRIPT"
   sed -n '/^json_escape()/,/^}/p' "$SCRIPT"
   sed -n '/^emit_hdf_requirement()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"

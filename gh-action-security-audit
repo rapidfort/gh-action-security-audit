@@ -442,7 +442,7 @@ extract_on_triggers() {
 
 # --- classify_prt: classify a pull_request_target workflow ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail
+# Outputs: detail (single value; markdown bold stripped at render time by strip_md)
 classify_prt() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   local has_checkout=0 has_fork_ref=0 has_author_guard=0 is_dependabot=0
@@ -456,22 +456,15 @@ classify_prt() {
   local dep_tag=""
   [ "$is_dependabot" = "1" ] && dep_tag=" (Dependabot)"
 
-  local detail="" detail_csv=""
   if [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "0" ]; then
-    detail="$wf_name$dep_tag (**checkout+exec, no guard**)"
-    detail_csv="$wf_name$dep_tag (checkout+exec; no guard)"
+    echo "$wf_name$dep_tag (**checkout+exec, no guard**)"
   elif [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "1" ]; then
-    detail="$wf_name$dep_tag (checkout, has guard)"
-    detail_csv="$wf_name$dep_tag (checkout; has guard)"
+    echo "$wf_name$dep_tag (checkout, has guard)"
   elif [ "$has_checkout" = "1" ]; then
-    detail="$wf_name$dep_tag (checkout, no fork ref)"
-    detail_csv="$wf_name$dep_tag (checkout; no fork ref)"
+    echo "$wf_name$dep_tag (checkout, no fork ref)"
   else
-    detail="$wf_name$dep_tag (API-only)"
-    detail_csv="$wf_name$dep_tag (API-only)"
+    echo "$wf_name$dep_tag (API-only)"
   fi
-
-  echo "${detail}|${detail_csv}"
 }
 
 # --- join_array_cells: join array elements with a separator, or "No" if empty ---
@@ -493,30 +486,31 @@ join_array_cells() {
   echo "$result"
 }
 
+# --- strip_md: remove markdown bold markers from a string ---
+# Args: string
+# Outputs: string with ** removed
+strip_md() {
+  printf '%s' "${1//\*\*/}"
+}
+
 # --- classify_ic: classify an issue_comment workflow ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail
+# Outputs: detail (single value)
 classify_ic() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
-  local detail="" detail_csv=""
 
   if grep -q 'author_association' <<<"$wf_uncommented"; then
-    detail="$wf_name (has author_association)"
-    detail_csv="$wf_name (has author_association)"
+    echo "$wf_name (has author_association)"
   elif grep -qE "user\.login\s*==|actor\s*==" <<<"$wf_uncommented"; then
-    detail="$wf_name (has actor check)"
-    detail_csv="$wf_name (has actor check)"
+    echo "$wf_name (has actor check)"
   else
-    detail="$wf_name (**no author gate**)"
-    detail_csv="$wf_name (no author gate)"
+    echo "$wf_name (**no author gate**)"
   fi
-
-  echo "${detail}|${detail_csv}"
 }
 
 # --- classify_expr_injection: detect dangerous expressions in run: blocks ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty string if no dangerous expressions found)
+# Outputs: detail (or empty string if no dangerous expressions found)
 # Dangerous: ${{ github.event.issue.title }}, ${{ github.head_ref }}, etc.
 # Safe: same expressions in env: blocks (assigned to env vars before run:)
 classify_expr_injection() {
@@ -557,51 +551,41 @@ classify_expr_injection() {
   local contexts
   contexts=$(paste -sd', ' - <<<"$found")
 
-  local detail="" detail_csv=""
-  detail="$wf_name (**${contexts}**)"
-  detail_csv="$wf_name (${contexts})"
-
-  echo "${detail}|${detail_csv}"
+  echo "$wf_name (**${contexts}**)"
 }
 
 # --- classify_wfr: classify a workflow_run trigger workflow ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if no workflow_run trigger)
+# Outputs: detail (or empty if no workflow_run trigger)
 # Sub-classification: download-artifact (HIGH), checkout (MEDIUM), API-only (LOW)
 classify_wfr() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
 
   [[ $wf_uncommented == *workflow_run* ]] || return 0
 
-  local detail="" detail_csv=""
   if [[ $wf_uncommented == *download-artifact* ]]; then
-    detail="$wf_name (**download-artifact**)"
-    detail_csv="$wf_name (download-artifact)"
+    echo "$wf_name (**download-artifact**)"
   elif [[ $wf_uncommented == *actions/checkout* ]]; then
-    detail="$wf_name (checkout)"
-    detail_csv="$wf_name (checkout)"
+    echo "$wf_name (checkout)"
   else
-    detail="$wf_name (API-only)"
-    detail_csv="$wf_name (API-only)"
+    echo "$wf_name (API-only)"
   fi
-
-  echo "${detail}|${detail_csv}"
 }
 
 # --- classify_self_hosted: detect self-hosted runner usage ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if no self-hosted runners)
+# Outputs: detail (or empty if no self-hosted runners)
 classify_self_hosted() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
 
   if grep -qiE 'runs-on:.*self-hosted' <<<"$wf_uncommented"; then
-    echo "$wf_name (**self-hosted**)|$wf_name (self-hosted)"
+    echo "$wf_name (**self-hosted**)"
   fi
 }
 
 # --- classify_dangerous_perms: detect dangerous permissions grants ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if no dangerous grants)
+# Outputs: detail (or empty if no dangerous grants)
 classify_dangerous_perms() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
 
@@ -626,12 +610,12 @@ classify_dangerous_perms() {
   danger_list=$(printf '%s, ' "${dangers[@]}")
   danger_list="${danger_list%, }"
 
-  echo "$wf_name (**${danger_list}**)|$wf_name (${danger_list})"
+  echo "$wf_name (**${danger_list}**)"
 }
 
 # --- classify_hardcoded_secrets: detect hardcoded tokens/keys in a workflow ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Detects: ghp_ (GitHub PAT), gho_ (GitHub OAuth), AKIA (AWS access key)
 classify_hardcoded_secrets() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -649,12 +633,12 @@ classify_hardcoded_secrets() {
   type_list=$(printf '%s, ' "${types[@]}")
   type_list="${type_list%, }"
 
-  echo "$wf_name (**${type_list}**)|$wf_name (${type_list})"
+  echo "$wf_name (**${type_list}**)"
 }
 
 # --- classify_unpinned: report pinned vs unpinned action refs in a workflow ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty string if no uses: lines)
+# Outputs: detail (or empty string if no uses: lines)
 classify_unpinned() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
 
@@ -672,31 +656,26 @@ classify_unpinned() {
     fi
   done <<<"$uses_lines"
 
-  local detail="" detail_csv=""
   if [ "$pinned" -eq "$total" ]; then
-    detail="$wf_name ($pinned/$total pinned)"
-    detail_csv="$wf_name ($pinned/$total pinned)"
+    echo "$wf_name ($pinned/$total pinned)"
   else
-    detail="$wf_name (**$pinned/$total pinned**)"
-    detail_csv="$wf_name ($pinned/$total pinned)"
+    echo "$wf_name (**$pinned/$total pinned**)"
   fi
-
-  echo "${detail}|${detail_csv}"
 }
 
 # --- classify_secrets_inherit: detect secrets: inherit in reusable workflow calls ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 classify_secrets_inherit() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   if grep -qE 'secrets:\s*inherit' <<<"$wf_uncommented"; then
-    echo "$wf_name (**secrets: inherit**)|$wf_name (secrets: inherit)"
+    echo "$wf_name (**secrets: inherit**)"
   fi
 }
 
 # --- classify_env_injection: detect writes to GITHUB_ENV/PATH/OUTPUT ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Flags any write to GITHUB_ENV, GITHUB_PATH, or GITHUB_OUTPUT as a risk.
 classify_env_injection() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -719,12 +698,12 @@ classify_env_injection() {
   target_list=$(printf '%s, ' "${targets[@]}")
   target_list="${target_list%, }"
 
-  echo "$wf_name (**${target_list}**)|$wf_name (${target_list})"
+  echo "$wf_name (**${target_list}**)"
 }
 
 # --- classify_deprecated_commands: detect deprecated workflow commands ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Detects: ::set-output, ::save-state, ::set-env, ::add-path
 classify_deprecated_commands() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -747,12 +726,12 @@ classify_deprecated_commands() {
   cmd_list=$(printf '%s, ' "${cmds[@]}")
   cmd_list="${cmd_list%, }"
 
-  echo "$wf_name (**::${cmd_list}**)|$wf_name (::${cmd_list})"
+  echo "$wf_name (**::${cmd_list}**)"
 }
 
 # --- classify_known_vulnerable: detect known-compromised actions ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Blocklist: tj-actions/changed-files, reviewdog/action-setup,
 #            dawidd6/action-download-artifact
 classify_known_vulnerable() {
@@ -773,12 +752,12 @@ classify_known_vulnerable() {
   found_list=$(printf '%s, ' "${found[@]}")
   found_list="${found_list%, }"
 
-  echo "$wf_name (**${found_list}**)|$wf_name (${found_list})"
+  echo "$wf_name (**${found_list}**)"
 }
 
 # --- classify_unpinned_third_party: distinguish first-party vs third-party unpinned ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if no third-party unpinned actions)
+# Outputs: detail (or empty if no third-party unpinned actions)
 # First-party: actions/*, github/* — lower risk when unpinned
 classify_unpinned_third_party() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -797,12 +776,12 @@ classify_unpinned_third_party() {
   done <<<"$uses_lines"
 
   [ "$third_party" -eq 0 ] && return 0
-  echo "$wf_name (**$third_party third-party unpinned**)|$wf_name ($third_party third-party unpinned)"
+  echo "$wf_name (**$third_party third-party unpinned**)"
 }
 
 # --- classify_always_secrets: detect always()/continue-on-error + secrets ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 classify_always_secrets() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   local has_always=0 has_continue=0 has_secrets=0
@@ -827,22 +806,22 @@ classify_always_secrets() {
   pattern_list=$(printf '%s, ' "${patterns[@]}")
   pattern_list="${pattern_list%, }"
 
-  echo "$wf_name (**${pattern_list} + secrets**)|$wf_name (${pattern_list} + secrets)"
+  echo "$wf_name (**${pattern_list} + secrets**)"
 }
 
 # --- classify_artifact_trust: detect download-artifact without validation ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 classify_artifact_trust() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   if grep -qE 'uses:.*download-artifact' <<<"$wf_uncommented"; then
-    echo "$wf_name (**download-artifact**)|$wf_name (download-artifact)"
+    echo "$wf_name (**download-artifact**)"
   fi
 }
 
 # --- classify_missing_environment: detect deployment without environment protection ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Deployment patterns: docker push, aws deploy, kubectl apply, terraform apply, helm upgrade
 classify_missing_environment() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -856,23 +835,23 @@ classify_missing_environment() {
     return 0
   fi
 
-  echo "$wf_name (**deploy without environment**)|$wf_name (deploy without environment)"
+  echo "$wf_name (**deploy without environment**)"
 }
 
 # --- classify_cache_poisoning: detect cache usage in fork-triggered workflows ---
 # Args: wf_name wf_content wf_uncommented wf_triggers
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 classify_cache_poisoning() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
   if ! grep -qE 'uses:.*actions/cache' <<<"$wf_uncommented"; then
     return 0
   fi
-  echo "$wf_name (**actions/cache**)|$wf_name (actions/cache)"
+  echo "$wf_name (**actions/cache**)"
 }
 
 # --- classify_static_credentials: detect static cloud credentials vs OIDC ---
 # Args: wf_name wf_content wf_uncommented
-# Outputs: md_detail|csv_detail (or empty if none found)
+# Outputs: detail (or empty if none found)
 # Checks for AWS_ACCESS_KEY_ID, AZURE_CREDENTIALS, GCP_SA_KEY without id-token: write
 classify_static_credentials() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
@@ -886,13 +865,13 @@ classify_static_credentials() {
     return 0
   fi
 
-  echo "$wf_name (**static cloud credentials**)|$wf_name (static cloud credentials)"
+  echo "$wf_name (**static cloud credentials**)"
 }
 
 # --- run_repo_classifiers: run all per-repo classifiers on a repo's workflows ---
 # Writes results to a cache file for consumption by build_hdf_repo_target and render_md_csv_row.
 # Args: repo_dir cache_file
-# Cache format: TAG|md_detail|csv_detail  or  META|key|value
+# Cache format: TAG|detail  or  META|key|value
 # Returns 1 if no workflow files found.
 run_repo_classifiers() {
   local repo_dir="$1"
@@ -1411,34 +1390,34 @@ build_hdf_repo_target() {
 
   [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
 
-  # Read classifier findings from cache (MD detail only, used for HDF codeDesc)
+  # Read classifier findings from cache (used for HDF codeDesc)
   local prt_findings=() ic_findings=() unpin_findings=() expr_findings=()
   local wfr_findings=() sh_findings=() dp_findings=() hs_findings=()
   local si_findings=() ei_findings=() dc_findings=() kv_findings=()
   local utp_findings=() as_findings=() at_findings=()
   local me_findings=() cp_findings=() sc_findings=()
 
-  local tag md_detail csv_detail
-  while IFS='|' read -r tag md_detail csv_detail; do
+  local tag detail
+  while IFS='|' read -r tag detail; do
     case "$tag" in
-      PRT) prt_findings+=("$md_detail") ;;
-      IC) ic_findings+=("$md_detail") ;;
-      UNPIN) unpin_findings+=("$md_detail") ;;
-      EXPR) expr_findings+=("$md_detail") ;;
-      WFR) wfr_findings+=("$md_detail") ;;
-      SH) sh_findings+=("$md_detail") ;;
-      DP) dp_findings+=("$md_detail") ;;
-      HS) hs_findings+=("$md_detail") ;;
-      SI) si_findings+=("$md_detail") ;;
-      EI) ei_findings+=("$md_detail") ;;
-      DC) dc_findings+=("$md_detail") ;;
-      KV) kv_findings+=("$md_detail") ;;
-      UTP) utp_findings+=("$md_detail") ;;
-      AS) as_findings+=("$md_detail") ;;
-      AT) at_findings+=("$md_detail") ;;
-      ME) me_findings+=("$md_detail") ;;
-      CP) cp_findings+=("$md_detail") ;;
-      SC) sc_findings+=("$md_detail") ;;
+      PRT) prt_findings+=("$detail") ;;
+      IC) ic_findings+=("$detail") ;;
+      UNPIN) unpin_findings+=("$detail") ;;
+      EXPR) expr_findings+=("$detail") ;;
+      WFR) wfr_findings+=("$detail") ;;
+      SH) sh_findings+=("$detail") ;;
+      DP) dp_findings+=("$detail") ;;
+      HS) hs_findings+=("$detail") ;;
+      SI) si_findings+=("$detail") ;;
+      EI) ei_findings+=("$detail") ;;
+      DC) dc_findings+=("$detail") ;;
+      KV) kv_findings+=("$detail") ;;
+      UTP) utp_findings+=("$detail") ;;
+      AS) as_findings+=("$detail") ;;
+      AT) at_findings+=("$detail") ;;
+      ME) me_findings+=("$detail") ;;
+      CP) cp_findings+=("$detail") ;;
+      SC) sc_findings+=("$detail") ;;
     esac
   done < <(grep -v '^META|' "$cache_file")
 
@@ -1550,50 +1529,20 @@ render_md_csv_row() {
   [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
 
   # Read classifier findings from cache into arrays
-  local prt_wfs=() prt_wfs_csv=()
-  local ic_wfs=() ic_wfs_csv=()
-  local unpin_wfs=() unpin_wfs_csv=()
-  local expr_wfs=() expr_wfs_csv=()
-  local wfr_wfs=() wfr_wfs_csv=()
-  local sh_wfs=() sh_wfs_csv=()
-  local dp_wfs=() dp_wfs_csv=()
-  local hs_wfs=() hs_wfs_csv=()
+  local prt_wfs=() ic_wfs=() unpin_wfs=() expr_wfs=()
+  local wfr_wfs=() sh_wfs=() dp_wfs=() hs_wfs=()
 
-  local tag md_detail csv_detail
-  while IFS='|' read -r tag md_detail csv_detail; do
+  local tag detail
+  while IFS='|' read -r tag detail; do
     case "$tag" in
-      PRT)
-        prt_wfs+=("$md_detail")
-        prt_wfs_csv+=("$csv_detail")
-        ;;
-      IC)
-        ic_wfs+=("$md_detail")
-        ic_wfs_csv+=("$csv_detail")
-        ;;
-      UNPIN)
-        unpin_wfs+=("$md_detail")
-        unpin_wfs_csv+=("$csv_detail")
-        ;;
-      EXPR)
-        expr_wfs+=("$md_detail")
-        expr_wfs_csv+=("$csv_detail")
-        ;;
-      WFR)
-        wfr_wfs+=("$md_detail")
-        wfr_wfs_csv+=("$csv_detail")
-        ;;
-      SH)
-        sh_wfs+=("$md_detail")
-        sh_wfs_csv+=("$csv_detail")
-        ;;
-      DP)
-        dp_wfs+=("$md_detail")
-        dp_wfs_csv+=("$csv_detail")
-        ;;
-      HS)
-        hs_wfs+=("$md_detail")
-        hs_wfs_csv+=("$csv_detail")
-        ;;
+      PRT) prt_wfs+=("$detail") ;;
+      IC) ic_wfs+=("$detail") ;;
+      UNPIN) unpin_wfs+=("$detail") ;;
+      EXPR) expr_wfs+=("$detail") ;;
+      WFR) wfr_wfs+=("$detail") ;;
+      SH) sh_wfs+=("$detail") ;;
+      DP) dp_wfs+=("$detail") ;;
+      HS) hs_wfs+=("$detail") ;;
     esac
   done < <(grep -v '^META|' "$cache_file")
 
@@ -1603,23 +1552,22 @@ render_md_csv_row() {
   local perms_cell perms_csv
   if [ "$wf_with_perms" -eq "$total_wf" ]; then
     perms_cell="All ($total_wf/$total_wf)"
-    perms_csv="All ($total_wf/$total_wf)"
   elif [ "$wf_with_perms" -eq 0 ]; then
     perms_cell="**None** (0/$total_wf)"
-    perms_csv="None (0/$total_wf)"
   else
     perms_cell="Partial ($wf_with_perms/$total_wf)"
-    perms_csv="Partial ($wf_with_perms/$total_wf)"
   fi
+  perms_csv=$(strip_md "$perms_cell")
 
-  # GHA-002..009: HDF status decides pass/fail; cache provides display detail
+  # GHA-002..009: HDF status decides pass/fail; cache provides display detail.
+  # MD cells use markdown bold as-is; CSV cells strip ** via strip_md().
   local prt_cell prt_csv
   if [ "$(_extract_hdf_status "$hdf_json" "GHA-002")" = "passed" ]; then
     prt_cell="No"
     prt_csv="No"
   else
     prt_cell=$(join_array_cells '<br/>' "${prt_wfs[@]+"${prt_wfs[@]}"}")
-    prt_csv=$(join_array_cells '; ' "${prt_wfs_csv[@]+"${prt_wfs_csv[@]}"}")
+    prt_csv=$(strip_md "$(join_array_cells '; ' "${prt_wfs[@]+"${prt_wfs[@]}"}")")
   fi
 
   local ic_cell ic_csv
@@ -1628,7 +1576,7 @@ render_md_csv_row() {
     ic_csv="No"
   else
     ic_cell=$(join_array_cells '<br/>' "${ic_wfs[@]+"${ic_wfs[@]}"}")
-    ic_csv=$(join_array_cells '; ' "${ic_wfs_csv[@]+"${ic_wfs_csv[@]}"}")
+    ic_csv=$(strip_md "$(join_array_cells '; ' "${ic_wfs[@]+"${ic_wfs[@]}"}")")
   fi
 
   local unpin_cell unpin_csv
@@ -1637,7 +1585,7 @@ render_md_csv_row() {
     unpin_csv="No"
   else
     unpin_cell=$(join_array_cells '<br/>' "${unpin_wfs[@]+"${unpin_wfs[@]}"}")
-    unpin_csv=$(join_array_cells '; ' "${unpin_wfs_csv[@]+"${unpin_wfs_csv[@]}"}")
+    unpin_csv=$(strip_md "$(join_array_cells '; ' "${unpin_wfs[@]+"${unpin_wfs[@]}"}")")
   fi
 
   local expr_cell expr_csv
@@ -1646,7 +1594,7 @@ render_md_csv_row() {
     expr_csv="No"
   else
     expr_cell=$(join_array_cells '<br/>' "${expr_wfs[@]+"${expr_wfs[@]}"}")
-    expr_csv=$(join_array_cells '; ' "${expr_wfs_csv[@]+"${expr_wfs_csv[@]}"}")
+    expr_csv=$(strip_md "$(join_array_cells '; ' "${expr_wfs[@]+"${expr_wfs[@]}"}")")
   fi
 
   local wfr_cell wfr_csv
@@ -1655,7 +1603,7 @@ render_md_csv_row() {
     wfr_csv="No"
   else
     wfr_cell=$(join_array_cells '<br/>' "${wfr_wfs[@]+"${wfr_wfs[@]}"}")
-    wfr_csv=$(join_array_cells '; ' "${wfr_wfs_csv[@]+"${wfr_wfs_csv[@]}"}")
+    wfr_csv=$(strip_md "$(join_array_cells '; ' "${wfr_wfs[@]+"${wfr_wfs[@]}"}")")
   fi
 
   local sh_cell sh_csv
@@ -1664,7 +1612,7 @@ render_md_csv_row() {
     sh_csv="No"
   else
     sh_cell=$(join_array_cells '<br/>' "${sh_wfs[@]+"${sh_wfs[@]}"}")
-    sh_csv=$(join_array_cells '; ' "${sh_wfs_csv[@]+"${sh_wfs_csv[@]}"}")
+    sh_csv=$(strip_md "$(join_array_cells '; ' "${sh_wfs[@]+"${sh_wfs[@]}"}")")
   fi
 
   local dp_cell dp_csv
@@ -1673,7 +1621,7 @@ render_md_csv_row() {
     dp_csv="No"
   else
     dp_cell=$(join_array_cells '<br/>' "${dp_wfs[@]+"${dp_wfs[@]}"}")
-    dp_csv=$(join_array_cells '; ' "${dp_wfs_csv[@]+"${dp_wfs_csv[@]}"}")
+    dp_csv=$(strip_md "$(join_array_cells '; ' "${dp_wfs[@]+"${dp_wfs[@]}"}")")
   fi
 
   local hs_cell hs_csv
@@ -1682,7 +1630,7 @@ render_md_csv_row() {
     hs_csv="No"
   else
     hs_cell=$(join_array_cells '<br/>' "${hs_wfs[@]+"${hs_wfs[@]}"}")
-    hs_csv=$(join_array_cells '; ' "${hs_wfs_csv[@]+"${hs_wfs_csv[@]}"}")
+    hs_csv=$(strip_md "$(join_array_cells '; ' "${hs_wfs[@]+"${hs_wfs[@]}"}")")
   fi
 
   # Harden-runner: HDF status passed→"Yes", failed→"No"

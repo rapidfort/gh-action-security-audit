@@ -68,6 +68,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --- JSON helpers -------------------------------------------------------------
+
+# json_escape: escape a string for safe inclusion in a JSON value.
+# Handles: backslashes, double quotes, newlines, tabs, carriage returns.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  printf '%s' "$s"
+}
+
 # --- Argument Parsing --------------------------------------------------------
 
 # require_arg: validate that an option has a non-empty, non-flag argument

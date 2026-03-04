@@ -141,9 +141,9 @@ fi
 # ANSI colors (disabled if not a terminal)
 if [ -t 1 ]; then
   RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-  CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+  CYAN='\033[0;36m'; DIM='\033[2m'; RESET='\033[0m'
 else
-  RED=''; YELLOW=''; GREEN=''; CYAN=''; BOLD=''; DIM=''; RESET=''
+  RED=''; YELLOW=''; GREEN=''; CYAN=''; DIM=''; RESET=''
 fi
 
 info()  { printf "${CYAN}[INFO]${RESET}  %s\n" "$*"; }
@@ -283,8 +283,8 @@ for repo in "${REPOS[@]}"; do
 
       grep -q 'actions/checkout' "$f" 2>/dev/null && has_checkout=1
       grep -qE 'pull_request\.head\.(sha|ref)' "$f" 2>/dev/null && has_fork_ref=1
-      grep -qE "user\.login\s*==\s*'dependabot" "$f" 2>/dev/null && is_dependabot=1
-      grep -qE "user\.login\s*==\s*'(dependabot|github-actions|renovate)" "$f" 2>/dev/null && has_author_guard=1
+      grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" "$f" 2>/dev/null && is_dependabot=1
+      grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" "$f" 2>/dev/null && has_author_guard=1
       grep -q 'author_association' "$f" 2>/dev/null && has_author_guard=1
 
       # Tag Dependabot-gated workflows so reviewers can skip false positives
@@ -463,32 +463,33 @@ cat > "$OUT_FILE" << EOF
 |---------|-------|----------------|
 EOF
 
+{
 # Default workflow permissions
 if [ "$default_wf_perm" = "write" ]; then
-  echo "| Default workflow permissions | \`write\` | Set to \`read\`. Workflows needing write access should declare explicit \`permissions:\` blocks. |" >> "$OUT_FILE"
+  echo "| Default workflow permissions | \`write\` | Set to \`read\`. Workflows needing write access should declare explicit \`permissions:\` blocks. |"
 elif [ "$default_wf_perm" = "read" ]; then
-  echo "| Default workflow permissions | \`read\` | No action needed. |" >> "$OUT_FILE"
+  echo "| Default workflow permissions | \`read\` | No action needed. |"
 else
-  echo "| Default workflow permissions | \`$default_wf_perm\` | Could not determine (may need admin scope). |" >> "$OUT_FILE"
+  echo "| Default workflow permissions | \`$default_wf_perm\` | Could not determine (may need admin scope). |"
 fi
 
 # Can approve PRs
 if [ "$can_approve_prs" = "True" ] || [ "$can_approve_prs" = "true" ]; then
-  echo "| Workflows can approve PRs | Yes | Consider disabling unless required. |" >> "$OUT_FILE"
+  echo "| Workflows can approve PRs | Yes | Consider disabling unless required. |"
 else
-  echo "| Workflows can approve PRs | No | No action needed. |" >> "$OUT_FILE"
+  echo "| Workflows can approve PRs | No | No action needed. |"
 fi
 
 # Allowed actions
 case "$allowed_actions" in
-  all) echo "| Allowed actions | All | Consider restricting to verified creators or a selected list. |" >> "$OUT_FILE" ;;
-  selected) echo "| Allowed actions | Selected | No action needed. |" >> "$OUT_FILE" ;;
-  *) echo "| Allowed actions | \`$allowed_actions\` | — |" >> "$OUT_FILE" ;;
+  all) echo "| Allowed actions | All | Consider restricting to verified creators or a selected list. |" ;;
+  selected) echo "| Allowed actions | Selected | No action needed. |" ;;
+  *) echo "| Allowed actions | \`$allowed_actions\` | — |" ;;
 esac
 
 # --- Per-repo table ---
 
-cat >> "$OUT_FILE" << 'EOF'
+cat << 'PERREPO'
 
 ## Per-Repository Audit
 
@@ -506,18 +507,18 @@ Columns:
 - **Repo Secrets**: Secret names configured directly on the repo (not values). These are accessible
   to any workflow that runs in the repo, including exploited `pull_request_target` workflows.
 
-EOF
+PERREPO
 
-echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |" >> "$OUT_FILE"
-echo "|------------|-------------|----------------------|-----------------|--------------|" >> "$OUT_FILE"
+echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |"
+echo "|------------|-------------|----------------------|-----------------|--------------|"
 
 sort "$TABLE_ROWS" | while IFS='|' read -r repo perms prt ic secrets; do
-  echo "| \`$repo\` | $perms | $prt | $ic | $secrets |" >> "$OUT_FILE"
+  echo "| \`$repo\` | $perms | $prt | $ic | $secrets |"
 done
 
 # --- Org secrets section ---
 
-cat >> "$OUT_FILE" << 'EOF'
+cat << 'ORGSECRETS'
 
 ## Org-Level Secrets
 
@@ -533,15 +534,15 @@ Columns:
 - **Suggested Command**: For `All repositories` secrets, a `gh secret set` command to restrict the
   secret to only the repos that reference it. Running the command will prompt for the secret value.
 
-EOF
+ORGSECRETS
 
 org_secret_count=$(wc -l < "$ORG_SECRETS_FILE" | tr -d ' ')
 
 if [ "$org_secret_count" -eq 0 ]; then
-  echo "No org-level secrets found (or insufficient permissions to list them)." >> "$OUT_FILE"
+  echo "No org-level secrets found (or insufficient permissions to list them)."
 else
-  echo "| Secret Name | Visibility | Configured Access | Referenced In Workflows | Suggested Command |" >> "$OUT_FILE"
-  echo "|-------------|------------|-------------------|------------------------|-------------------|" >> "$OUT_FILE"
+  echo "| Secret Name | Visibility | Configured Access | Referenced In Workflows | Suggested Command |"
+  echo "|-------------|------------|-------------------|------------------------|-------------------|"
 
   sort "$ORG_SECRETS_FILE" | while IFS='|' read -r name vis configured referenced; do
     case "$vis" in
@@ -551,10 +552,10 @@ else
         else
           cmd="\`gh secret set $name --org $ORG --visibility selected --repos $referenced\`"
         fi
-        echo "| \`$name\` | **All repositories** | (all) | $referenced | $cmd |" >> "$OUT_FILE"
+        echo "| \`$name\` | **All repositories** | (all) | $referenced | $cmd |"
         ;;
       *)
-        echo "| \`$name\` | $vis | $configured | $referenced | — |" >> "$OUT_FILE"
+        echo "| \`$name\` | $vis | $configured | $referenced | — |"
         ;;
     esac
   done
@@ -562,7 +563,7 @@ fi
 
 # --- Guidance ---
 
-cat >> "$OUT_FILE" << 'EOF'
+cat << 'GUIDANCE'
 
 ## Review Guidance
 
@@ -599,7 +600,8 @@ events from forks. It provides **no protection** for:
 - **Explicit `permissions:` blocks**: Limits `GITHUB_TOKEN` blast radius even if RCE is achieved
 - **No checkout**: Workflows that only make API calls (approve, label, merge) without checking
   out fork code are not vulnerable to code injection
-EOF
+GUIDANCE
+} >> "$OUT_FILE"
 
 # --- CSV output ---
 

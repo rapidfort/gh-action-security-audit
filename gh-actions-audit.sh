@@ -40,6 +40,9 @@
 #   --cleanup        Delete cached workflow files after the run completes.
 #                    By default the script keeps them for reuse with --local.
 #
+#   --exit-code      Exit with status 1 if critical or high findings are
+#                    detected. Useful for CI pipelines. Default: always exit 0.
+#
 #   -h, --help       Show this help message and exit.
 #
 # Authentication:
@@ -134,6 +137,7 @@ OUT_FILE=""
 CSV_FILE=""
 HDF_FILE=""
 CLEANUP=0
+EXIT_CODE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -159,6 +163,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cleanup)
       CLEANUP=1
+      shift
+      ;;
+    --exit-code)
+      EXIT_CODE=1
       shift
       ;;
     -h | --help)
@@ -1984,7 +1992,6 @@ build_hdf_wrapper "$ORG" "$HDF_REPO_TARGETS_FILE" "$HDF_ORG_TARGET_JSON" >"$HDF_
 
 if [ -n "$HDF_FILE" ]; then
   cp "$HDF_OUTPUT_FILE" "$HDF_FILE"
-  info "HDF v2 report written to $HDF_FILE"
 fi
 
 # =============================================================================
@@ -2252,11 +2259,38 @@ if [ -n "$CSV_FILE" ]; then
       done < <(sort "$ORG_SECRETS_FILE")
     fi
   } >"$CSV_FILE"
-
-  info "CSV written to: $CSV_FILE"
 fi
 
-# --- Cleanup (temp files handled by trap EXIT) ---
+# --- Terminal summary ---
 
 info "Report written to: $OUT_FILE"
+[ -n "$CSV_FILE" ] && info "CSV written to: $CSV_FILE"
+[ -n "$HDF_FILE" ] && info "HDF written to: $HDF_FILE"
+
+# Count critical/high findings for terminal summary
+# Critical: prt (col 3), expr injection (col 6), hardcoded secrets (col 10)
+# High: ic (col 4), unpinned (col 5), wfr (col 7), sh (col 8), no-perms (col 2)
+critical_findings=$((prt_count + expr_count + hs_count))
+high_findings=$((ic_count + unpin_count + wfr_count + sh_count + no_perms_count))
+medium_findings=$((dp_count))
+
+echo ""
+if [ "$critical_findings" -gt 0 ]; then
+  printf '%s  %d critical%s, ' "$RED" "$critical_findings" "$RESET"
+else
+  printf '%s  0 critical%s, ' "$GREEN" "$RESET"
+fi
+if [ "$high_findings" -gt 0 ]; then
+  printf '%s%d high%s, ' "$YELLOW" "$high_findings" "$RESET"
+else
+  printf '%s0 high%s, ' "$GREEN" "$RESET"
+fi
+printf '%d medium findings across %d repos\n' "$medium_findings" "$total_repos_scanned"
+
+# --- Exit code ---
+
 handle_cache_cleanup
+
+if [ "$EXIT_CODE" -eq 1 ] && [ "$((critical_findings + high_findings))" -gt 0 ]; then
+  exit 1
+fi

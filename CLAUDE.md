@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A comprehensive GitHub Actions security scanner, distributed as a **`gh` CLI extension** (`gh actions-audit`), that evolves with the threat landscape and community best practices. The tool:
 
-- **Detects real-world attack patterns** — pwn requests, expression injection, supply chain poisoning, artifact trust violations, and more — mapped to [OWASP CI/CD Top 10](https://owasp.org/www-project-top-10-ci-cd-security-risks/) risk categories
+- **Detects real-world attack patterns** — pwn requests, expression injection, supply chain poisoning, artifact trust violations, and more
+- **Maps findings to CCI controls** — each detection maps to [CCI](https://cyber.trackr.live/api/cci) identifiers, providing transitive mapping to NIST SP 800-53 controls. Enables integration with GRC tooling like [MITRE Heimdall](https://saf.mitre.org). [OWASP CI/CD Top 10](https://owasp.org/www-project-top-10-ci-cd-security-risks/) categories used for informational context
 - **Uses a structured JSONL intermediate format** — one JSON object per repo, decoupling analysis from rendering. All output formats (markdown, CSV, JSONL, and potentially [HDF v2](https://saf.mitre.org)) are rendered from this single source of truth
-- **Maps findings to compliance controls** — CCI identifiers with transitive mapping to NIST SP 800-53 controls, enabling integration with GRC tooling like [MITRE Heimdall](https://saf.mitre.org)
 - **Follows `gh` CLI conventions** — `--json`, `--jq`, proper exit codes, `NO_COLOR` support, installable via `gh extension install`
 - **Stays grep-based and dependency-light** — bash 3.2+, `gh` CLI, standard Unix tools. No YAML parser, no runtime beyond what ships with macOS/Linux
 

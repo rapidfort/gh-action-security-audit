@@ -1,0 +1,8 @@
+name: Uses known-compromised reviewdog
+on: push
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: reviewdog/action-setup@v1

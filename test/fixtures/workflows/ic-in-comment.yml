@@ -1,0 +1,12 @@
+name: Build and Test
+on: push
+
+# NOTE: This workflow does NOT use issue_comment trigger.
+# See issue-comment-with-gate.yml for the issue_comment version.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "building"

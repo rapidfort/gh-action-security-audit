@@ -1,0 +1,796 @@
+# gh-actions-audit HDF v2 Profile — Requirement Catalog
+# Each requirement maps to an HDF v2 requirement object with CCI/NIST tags.
+# Generated from CCI API: https://cyber.trackr.live/api/cci
+#
+# Impact scale: 0.9=critical, 0.7=high, 0.5=medium, 0.3=low, 0.1=info
+# CCI source: DISA Control Correlation Identifiers, mapped to NIST 800-53 rev 4/5
+
+# ============================================================================
+# Per-Repository Checks (GHA-001 through GHA-010)
+# ============================================================================
+
+- id: GHA-001
+  title: "Workflows MUST use explicit permissions blocks to enforce least privilege"
+  desc: >
+    Workflows missing a top-level or job-level permissions: block inherit the
+    organization's default GITHUB_TOKEN permissions, which is often read-write.
+    This violates the principle of least privilege and expands the blast radius
+    of any workflow compromise.
+  check: >
+    Verify that every workflow file contains a top-level or job-level
+    permissions: block. Check that no workflow relies on the org default.
+  fix: >
+    Add a permissions: block to each workflow file specifying only the minimum
+    required permissions. Use 'permissions: read-all' as a starting point and
+    narrow to specific scopes (e.g., contents: read, issues: write).
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+  nist:
+    - AC-6
+  owasp_cicd: CICD-SEC-1
+  classifier: explicit_permissions
+  implemented: true
+
+- id: GHA-002
+  title: "Workflows MUST NOT use pull_request_target with unchecked fork code execution"
+  desc: >
+    The pull_request_target trigger runs workflows in the context of the target
+    (base) repository with access to its secrets and write GITHUB_TOKEN. If the
+    workflow checks out and executes code from the fork PR (head ref), an
+    attacker can achieve arbitrary code execution with the target repo's
+    credentials. This is the 'pwn request' attack pattern.
+  check: >
+    Verify that no workflow using pull_request_target checks out the PR head
+    ref (github.event.pull_request.head.sha, github.head_ref, or
+    pull_request.head.repo.full_name) without an author_association or
+    github.actor guard.
+  fix: >
+    Use the pull_request trigger instead (runs in fork context without secrets).
+    If pull_request_target is required, add an author_association guard
+    (e.g., if: github.event.pull_request.author_association == 'MEMBER')
+    before any checkout of fork code. Never execute fork code in the target
+    context without verification.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - AC-3
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_prt
+  implemented: true
+
+- id: GHA-003
+  title: "Workflows using issue_comment trigger MUST gate on author association"
+  desc: >
+    The issue_comment trigger fires when any GitHub user comments on a public
+    repo's issues or PRs. Without an author_association or github.actor check,
+    any external user can trigger the workflow, potentially executing commands
+    or accessing secrets.
+  check: >
+    Verify that every workflow triggered by issue_comment includes a condition
+    checking github.event.comment.author_association or github.actor before
+    executing privileged operations.
+  fix: >
+    Add an author_association guard to issue_comment workflows:
+    if: github.event.comment.author_association == 'MEMBER' ||
+    github.event.comment.author_association == 'OWNER'. Alternatively, check
+    github.actor against an allowlist.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+  nist:
+    - AC-3
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_ic
+  implemented: true
+
+- id: GHA-004
+  title: "Actions MUST be pinned to immutable SHA references, not mutable tags"
+  desc: >
+    Action references using mutable tags (@v4, @main) are vulnerable to
+    tag-override supply chain attacks. An attacker who compromises an action's
+    repository can move the tag to point to malicious code, affecting all
+    downstream consumers. The tj-actions/changed-files compromise
+    (CVE-2025-30066) exploited this exact pattern.
+  check: >
+    Verify that all third-party action references in uses: clauses are pinned
+    to full 40-character SHA hashes, not version tags or branch names.
+  fix: >
+    Pin all action references to their full SHA hash:
+    uses: actions/checkout@<full-sha>  # v4.1.1
+    Use tools like step-security/secure-repo or Dependabot to automate
+    SHA pinning and updates.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-002706  # SI-7(1): Software/Firmware/Info Integrity — Integrity Checks
+  nist:
+    - SI-7 (1)
+  owasp_cicd: CICD-SEC-3
+  classifier: classify_unpinned
+  implemented: true
+
+- id: GHA-005
+  title: "Workflows MUST NOT interpolate untrusted expressions in run blocks"
+  desc: >
+    GitHub Actions expressions like ${{ github.event.pull_request.title }},
+    ${{ github.event.issue.body }}, and ${{ github.head_ref }} are
+    user-controlled. When interpolated directly into run: blocks, they enable
+    shell command injection. An attacker can craft a PR title or branch name
+    containing shell metacharacters to execute arbitrary commands.
+  check: >
+    Verify that no run: block contains direct interpolation of dangerous
+    expressions: github.event.pull_request.title, .body, .head.ref,
+    github.event.issue.title, .body, github.event.comment.body,
+    github.head_ref, inputs.*, github.event.client_payload.*.
+  fix: >
+    Pass untrusted values through environment variables instead of direct
+    interpolation. Use 'env: TITLE: ${{ github.event.pull_request.title }}'
+    and reference as '$TITLE' in the run block. This prevents shell
+    metacharacter interpretation.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_expr_injection
+  implemented: true
+
+- id: GHA-006
+  title: "Workflows using workflow_run MUST validate artifact provenance"
+  desc: >
+    The workflow_run trigger runs with write permissions and full secret access
+    regardless of the triggering event (including fork PRs). Workflows that
+    download and execute artifacts from workflow_run are vulnerable to artifact
+    poisoning — an attacker triggers a fork PR, the initial workflow produces
+    a poisoned artifact, and the workflow_run workflow executes it with
+    elevated privileges.
+  check: >
+    Verify that workflow_run workflows do not download and execute artifacts
+    without provenance validation. Flag download-artifact usage as high risk,
+    checkout as medium, API-only as low.
+  fix: >
+    Validate artifact provenance before execution. Use artifact attestation
+    (actions/attest-build-provenance) to verify artifacts were produced by
+    trusted workflows. Avoid downloading and executing artifacts from
+    untrusted workflow runs.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+    - CCI-000213  # AC-3: Access Enforcement
+  nist:
+    - SI-7 (1)
+    - AC-3
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_wfr
+  implemented: true
+
+- id: GHA-007
+  title: "Workflows SHOULD NOT use self-hosted runners for public repositories"
+  desc: >
+    Self-hosted runners are persistent machines that retain state between
+    workflow runs. In public repositories, any fork PR can trigger workflows
+    on self-hosted runners, enabling credential theft, lateral movement, and
+    persistent backdoors. Unlike GitHub-hosted runners, self-hosted runners
+    are not ephemeral and may have access to internal networks.
+  check: >
+    Verify that no workflow in a public repository uses runs-on: self-hosted
+    or custom runner labels without compensating controls.
+  fix: >
+    Use GitHub-hosted runners for public repositories. If self-hosted runners
+    are required, use ephemeral runners (--ephemeral flag), restrict to
+    private repos, and implement network segmentation. Consider using
+    actions-runner-controller with auto-scaling ephemeral pods.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-000366  # CM-6: Configuration Settings
+  nist:
+    - CM-6
+  owasp_cicd: CICD-SEC-1
+  classifier: classify_self_hosted
+  implemented: true
+
+- id: GHA-008
+  title: "Workflows MUST NOT request excessive GITHUB_TOKEN permissions"
+  desc: >
+    Workflows with permissions: write-all, contents: write, actions: write,
+    or packages: write grant the GITHUB_TOKEN broad access that may not be
+    needed. If the workflow is compromised, these permissions expand the
+    attacker's capabilities.
+  check: >
+    Verify that workflow permissions: blocks do not include write-all or
+    unnecessary write scopes. Check for contents: write, actions: write,
+    packages: write, and id-token: write when not required by the workflow.
+  fix: >
+    Scope permissions to the minimum required. Replace write-all with specific
+    scopes. Remove write permissions that aren't actively used. Audit each
+    workflow's actual permission needs.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+    - CCI-000381  # CM-7: Least Functionality
+  nist:
+    - AC-6
+    - CM-7
+  owasp_cicd: CICD-SEC-1
+  classifier: classify_dangerous_perms
+  implemented: true
+
+- id: GHA-009
+  title: "Workflows MUST NOT contain hardcoded secrets or credentials"
+  desc: >
+    Hardcoded tokens (ghp_*, gho_*), AWS access keys (AKIA*), and other
+    credentials in workflow files are exposed to anyone with read access to
+    the repository. These should always use GitHub Secrets.
+  check: >
+    Verify that no workflow file contains patterns matching known credential
+    formats: ghp_[A-Za-z0-9]{36}, gho_[A-Za-z0-9]{36}, AKIA[A-Z0-9]{16}.
+    Check uncommented lines only.
+  fix: >
+    Remove hardcoded credentials immediately. Rotate any exposed tokens.
+    Store credentials in GitHub Secrets (repo or org level) and reference
+    them as ${{ secrets.SECRET_NAME }} in workflows.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-000196  # IA-5(1): Authenticator Management — Password-Based Auth
+  nist:
+    - IA-5 (1)
+  owasp_cicd: CICD-SEC-6
+  classifier: classify_hardcoded_secrets
+  implemented: true
+
+- id: GHA-010
+  title: "Repositories SHOULD use harden-runner for runtime workflow monitoring"
+  desc: >
+    step-security/harden-runner provides runtime monitoring of workflow
+    execution, detecting anomalous network connections, file access, and
+    process execution. It was instrumental in detecting the tj-actions
+    compromise. While not a hard requirement, its absence reduces visibility
+    into supply chain attacks.
+  check: >
+    Verify whether the repository uses step-security/harden-runner in its
+    workflow files.
+  fix: >
+    Add step-security/harden-runner as the first step in each workflow job:
+    - uses: step-security/harden-runner@<sha>
+      with:
+        egress-policy: audit
+    Upgrade to egress-policy: block once baseline is established.
+  impact: 0.1
+  severity: info
+  cci:
+    - CCI-002724  # SI-7(8): Auditing Capability for Significant Events
+  nist:
+    - SI-7 (8)
+  owasp_cicd: CICD-SEC-8
+  classifier: harden_runner
+  implemented: true
+
+# ============================================================================
+# Org-Level Checks (GHA-011 through GHA-013)
+# ============================================================================
+
+- id: GHA-011
+  title: "Organization MUST set default workflow permissions to read-only"
+  desc: >
+    The organization's default GITHUB_TOKEN permissions apply to all workflows
+    that don't specify their own permissions: block. The default of 'write'
+    grants all workflows read-write access to the repository, expanding the
+    blast radius of any compromise.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions/workflow that
+    default_workflow_permissions is set to 'read'.
+  fix: >
+    Set the org default to read-only: Settings → Actions → General →
+    Workflow permissions → Read repository contents and packages permissions.
+    Or use the API: PATCH /orgs/{org}/actions/permissions/workflow with
+    {"default_workflow_permissions": "read"}.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+  nist:
+    - AC-6
+  owasp_cicd: CICD-SEC-1
+  classifier: org_default_permissions
+  implemented: true
+
+- id: GHA-012
+  title: "Organization SHOULD NOT allow workflows to approve pull requests"
+  desc: >
+    When workflows can approve PRs, a compromised or misconfigured workflow
+    can self-approve changes, bypassing human review. This undermines the
+    separation of duties principle.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions/workflow that
+    can_approve_pull_request_reviews is false.
+  fix: >
+    Disable workflow PR approval: Settings → Actions → General →
+    Workflow permissions → uncheck 'Allow GitHub Actions to create and
+    approve pull requests'.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+  nist:
+    - AC-3
+  owasp_cicd: CICD-SEC-1
+  classifier: org_pr_approval
+  implemented: true
+
+- id: GHA-013
+  title: "Organization SHOULD restrict allowed actions to verified or selected"
+  desc: >
+    Allowing all actions permits workflows to use any third-party action,
+    including unvetted or malicious ones. Restricting to verified creators
+    or a selected allowlist reduces supply chain risk.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions that allowed_actions
+    is set to 'selected' or 'verified' (not 'all').
+  fix: >
+    Restrict allowed actions: Settings → Actions → General → Actions
+    permissions → select 'Allow select actions and reusable workflows'
+    or 'Allow actions created by GitHub'.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000381  # CM-7: Least Functionality
+    - CCI-001762  # CM-7(1): Periodic Review
+  nist:
+    - CM-7
+    - CM-7 (1)
+  owasp_cicd: CICD-SEC-3
+  classifier: org_allowed_actions
+  implemented: true
+
+# ============================================================================
+# Additional Per-Repository Checks (GHA-014 through GHA-026)
+# ============================================================================
+
+- id: GHA-014
+  title: "Reusable workflow calls MUST NOT use secrets: inherit"
+  desc: >
+    Using 'secrets: inherit' in workflow_call passes ALL repository secrets
+    to the called workflow. If the reusable workflow is compromised or
+    over-privileged, every secret is exposed. This violates the principle
+    of least privilege for secret access.
+  check: >
+    Verify that no workflow using workflow_call includes 'secrets: inherit'.
+    Check that called workflows receive only explicitly named secrets.
+  fix: >
+    Replace 'secrets: inherit' with explicit secret passing:
+    secrets:
+      MY_TOKEN: ${{ secrets.MY_TOKEN }}
+    Only pass the specific secrets the called workflow needs.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+  nist:
+    - AC-6
+  owasp_cicd: CICD-SEC-6
+  classifier: classify_secrets_inherit
+  implemented: true
+  card: 1ts
+
+- id: GHA-015
+  title: "Workflows MUST NOT write untrusted data to GITHUB_ENV, GITHUB_PATH, or GITHUB_OUTPUT"
+  desc: >
+    Values written to GITHUB_ENV become environment variables for ALL
+    subsequent steps. Values written to GITHUB_PATH are prepended to PATH.
+    Values written to GITHUB_OUTPUT are available as step outputs. If
+    untrusted data (e.g., from github.event.*) is written to these files,
+    an attacker can achieve arbitrary code execution or PATH hijacking in
+    downstream steps.
+  check: >
+    Verify that no run: block writes untrusted expressions to GITHUB_ENV,
+    GITHUB_PATH, or GITHUB_OUTPUT via >> $GITHUB_ENV, >> $GITHUB_PATH,
+    or >> $GITHUB_OUTPUT patterns, especially when combined with
+    github.event.* interpolation.
+  fix: >
+    Validate and sanitize all values before writing to GITHUB_ENV/PATH/OUTPUT.
+    Use environment variables (env:) to pass untrusted values rather than
+    writing to these files. If writing is necessary, use a delimiter-based
+    multiline syntax and validate the content.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_env_injection
+  implemented: true
+  card: 3io
+
+- id: GHA-016
+  title: "Workflows MUST NOT interpolate additional dangerous expression contexts"
+  desc: >
+    Beyond the common injection vectors (PR title, issue body, head_ref),
+    several additional expression contexts are attacker-controlled:
+    github.event.ref (create/delete triggers), github.event.head_commit.message,
+    head_commit.author.name/email, discussion.title/body, and
+    pages[].page_name. All require the same env-var protection.
+  check: >
+    Verify that run: blocks do not directly interpolate: github.event.ref,
+    github.event.head_commit.message, github.event.head_commit.author.name,
+    github.event.head_commit.author.email, github.event.discussion.title,
+    github.event.discussion.body, github.event.pages.*.page_name.
+  fix: >
+    Pass all untrusted expressions through environment variables. Never
+    interpolate user-controlled values directly into shell commands.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_expr_injection
+  implemented: true
+  card: auu
+
+- id: GHA-017
+  title: "Workflows MUST NOT use deprecated workflow commands"
+  desc: >
+    The workflow commands ::set-output, ::save-state, ::set-env, and
+    ::add-path were deprecated because they are injection vectors. Any
+    action that prints to STDOUT can inject these commands, modifying
+    environment variables or outputs of other steps. GitHub will disable
+    these commands entirely.
+  check: >
+    Verify that no run: block contains ::set-output, ::save-state,
+    ::set-env, or ::add-path workflow command strings.
+  fix: >
+    Replace deprecated commands with their file-based equivalents:
+    ::set-output → echo "key=value" >> $GITHUB_OUTPUT
+    ::save-state → echo "key=value" >> $GITHUB_STATE
+    ::set-env → echo "key=value" >> $GITHUB_ENV
+    ::add-path → echo "/path" >> $GITHUB_PATH
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-001310  # SI-10: Information Input Validation
+    - CCI-000366  # CM-6: Configuration Settings
+  nist:
+    - SI-10
+    - CM-6
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_deprecated_commands
+  implemented: true
+  card: vdc
+
+- id: GHA-018
+  title: "Workflows MUST NOT use known-compromised actions"
+  desc: >
+    Certain actions have been publicly compromised in supply chain attacks.
+    Using these actions (even pinned to post-compromise SHAs) indicates the
+    repository was or may have been affected. Known compromised actions
+    include tj-actions/changed-files (CVE-2025-30066, 23K repos),
+    reviewdog/action-setup (CVE-2025-30154), and dawidd6/action-download-artifact.
+  check: >
+    Verify that no workflow uses known-compromised actions. Check uses:
+    clauses against the maintained blocklist of compromised action names
+    and version ranges.
+  fix: >
+    Remove or replace compromised actions immediately. Check CI logs for
+    signs of secret exfiltration during the compromise window. Rotate any
+    secrets that may have been exposed. Use alternative actions or inline
+    the functionality.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+  nist:
+    - SI-7 (1)
+  owasp_cicd: CICD-SEC-3
+  classifier: classify_known_vulnerable
+  implemented: true
+  card: v6j
+
+- id: GHA-019
+  title: "Workflows MUST NOT interpolate github.event.ref in run blocks"
+  desc: >
+    The create and delete events fire when branches or tags are created or
+    deleted. The github.event.ref value (branch/tag name) is fully
+    attacker-controlled. Direct interpolation in run: blocks enables shell
+    injection via crafted branch names.
+  check: >
+    Verify that no run: block in workflows triggered by create or delete
+    events directly interpolates ${{ github.event.ref }}.
+  fix: >
+    Pass github.event.ref through an environment variable:
+    env: REF_NAME: ${{ github.event.ref }}
+    Then use $REF_NAME in the run block.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_expr_injection
+  implemented: true
+  card: 5lj
+  note: "Merged with GHA-016 — shared dangerous_pattern regex"
+
+- id: GHA-020
+  title: "Unpinned first-party actions SHOULD be distinguished from third-party"
+  desc: >
+    Actions maintained by GitHub (actions/*, github/*) have a lower risk
+    profile when unpinned compared to third-party actions, since GitHub
+    controls the tag namespace. However, they are still technically vulnerable
+    to tag mutation. Third-party unpinned actions carry significantly higher
+    supply chain risk.
+  check: >
+    Verify whether unpinned action references are first-party (actions/*,
+    github/*) or third-party. Report the breakdown separately.
+  fix: >
+    Pin all actions to SHA hashes. Prioritize pinning third-party actions
+    first, as they carry higher supply chain risk. Use Dependabot or
+    step-security/secure-repo to automate SHA pinning.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+  nist:
+    - SI-7 (1)
+  owasp_cicd: CICD-SEC-3
+  classifier: classify_unpinned
+  implemented: true
+  card: "06o"
+
+- id: GHA-021
+  title: "pull_request_target workflows MUST NOT checkout untrusted refs"
+  desc: >
+    The core pwn request pattern involves checking out attacker-controlled
+    code (head.sha, head.ref, PR merge ref) in a pull_request_target
+    workflow that has access to target repo secrets. This check specifically
+    flags ref: parameters in checkout steps that reference untrusted sources.
+  check: >
+    Verify that checkout steps in pull_request_target workflows do not use
+    ref: parameters referencing github.event.pull_request.head.sha,
+    github.head_ref, or PR number-based refs.
+  fix: >
+    Do not checkout fork code in pull_request_target workflows. If checkout
+    is necessary, use the base ref and compare diffs via API. For build
+    operations on fork code, use the pull_request trigger instead.
+  impact: 0.9
+  severity: critical
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+    - CCI-001310  # SI-10: Information Input Validation
+  nist:
+    - AC-3
+    - SI-10
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_prt
+  implemented: true
+  card: co0
+
+- id: GHA-022
+  title: "Workflows MUST NOT combine always()/continue-on-error with secret access"
+  desc: >
+    Using if: always() or continue-on-error: true ensures steps run even
+    after previous steps fail. When combined with secret access, this pattern
+    can be exploited to exfiltrate secrets after a security gate has failed
+    or an error has occurred.
+  check: >
+    Verify that steps or jobs using if: always() or continue-on-error: true
+    do not also access secrets.* in the same job context.
+  fix: >
+    Remove always() or continue-on-error from steps that access secrets.
+    If unconditional execution is needed, separate secret-accessing steps
+    into a different job that depends on the outcome of the first.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+  nist:
+    - AC-3
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_always_secrets
+  implemented: true
+  card: dup
+
+- id: GHA-023
+  title: "Workflows MUST treat downloaded artifacts as untrusted input"
+  desc: >
+    Artifacts uploaded by actions/upload-artifact are accessible to any
+    workflow in the repository. Downloading and executing artifact contents
+    without validation is equivalent to arbitrary code execution. This
+    applies to all workflows, not just workflow_run contexts. Real-world
+    exploits include Rust artifact poisoning and the ArtiPACKED attack.
+  check: >
+    Verify that all uses of actions/download-artifact are followed by
+    integrity validation before execution of downloaded contents.
+  fix: >
+    Treat all downloaded artifacts as untrusted. Validate checksums or
+    signatures before executing artifact contents. Use artifact attestation
+    (actions/attest-build-provenance) for provenance verification.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+  nist:
+    - SI-7 (1)
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_artifact_trust
+  implemented: true
+  card: dz7
+
+- id: GHA-024
+  title: "Deployment workflows SHOULD use environment protection rules"
+  desc: >
+    Workflows that perform deployment operations (docker push, aws deploy,
+    kubectl apply, terraform apply) without an environment: key lack
+    approval gates and protection rules. Any automated event can trigger
+    production deployments without human review.
+  check: >
+    Verify that workflows containing common deployment patterns also include
+    an environment: key referencing a protected environment.
+  fix: >
+    Create protected environments in repo settings with required reviewers
+    and deployment branch restrictions. Add 'environment: production' (or
+    appropriate name) to deployment jobs.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000213  # AC-3: Access Enforcement
+    - CCI-000366  # CM-6: Configuration Settings
+  nist:
+    - AC-3
+    - CM-6
+  owasp_cicd: CICD-SEC-1
+  classifier: classify_missing_environment
+  implemented: true
+  card: cta
+
+- id: GHA-025
+  title: "Fork-triggered workflows SHOULD NOT populate shared caches"
+  desc: >
+    Cache entries created by actions/cache are shared across workflows and
+    branches. A pull_request-triggered workflow from a fork can poison cache
+    entries that are later consumed by main branch builds, enabling
+    persistent code execution in the trusted context.
+  check: >
+    Verify that workflows triggered by pull_request from forks do not use
+    actions/cache or the cache: key in a way that could poison shared entries.
+  fix: >
+    Use separate cache keys for fork PR builds. Consider using
+    actions/cache/restore (read-only) in fork-triggered workflows. Implement
+    cache isolation between trusted and untrusted workflow contexts.
+  impact: 0.7
+  severity: high
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+  nist:
+    - SI-7 (1)
+  owasp_cicd: CICD-SEC-4
+  classifier: classify_cache_poisoning
+  implemented: true
+  card: lfv
+
+- id: GHA-026
+  title: "Cloud deployments SHOULD use OIDC federation instead of static credentials"
+  desc: >
+    Storing long-lived cloud credentials (AWS_ACCESS_KEY_ID, AZURE_CREDENTIALS,
+    GCP_SA_KEY) as GitHub Secrets creates persistent credential exposure risk.
+    OIDC federation (id-token: write) provides short-lived, automatically
+    rotated credentials scoped to specific workflows.
+  check: >
+    Verify that workflows referencing common cloud credential secret names
+    also include id-token: write in their permissions block, indicating
+    OIDC federation is configured.
+  fix: >
+    Configure OIDC federation with your cloud provider:
+    AWS: configure-aws-credentials with role-to-assume
+    Azure: azure/login with OIDC
+    GCP: auth with workload_identity_provider
+    Remove static credential secrets after migration.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+    - CCI-000196  # IA-5(1): Authenticator Management
+  nist:
+    - AC-6
+    - IA-5 (1)
+  owasp_cicd: CICD-SEC-6
+  classifier: classify_static_credentials
+  implemented: true
+  card: wzi
+
+# ============================================================================
+# Additional Org-Level Checks (GHA-027 through GHA-029)
+# ============================================================================
+
+- id: GHA-027
+  title: "Organization SHOULD enforce SHA pinning for actions"
+  desc: >
+    The sha_pinning_required org setting (added August 2025) enforces that
+    all action references use SHA pinning. When enabled, workflows using
+    mutable tags are rejected. This provides organization-wide protection
+    against tag-override supply chain attacks.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions that
+    sha_pinning_required is true.
+  fix: >
+    Enable SHA pinning enforcement in org settings. Ensure all existing
+    workflows are updated to use SHA-pinned action references before
+    enabling, or they will fail.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-002706  # SI-7(1): Integrity Checks
+    - CCI-000366  # CM-6: Configuration Settings
+  nist:
+    - SI-7 (1)
+    - CM-6
+  owasp_cicd: CICD-SEC-3
+  classifier: org_sha_pinning
+  implemented: true
+  card: 4yh
+
+- id: GHA-028
+  title: "Organization SHOULD restrict which repositories can use GitHub Actions"
+  desc: >
+    The enabled_repositories org setting controls which repositories can
+    use GitHub Actions (all, none, or selected). Allowing all repositories
+    increases the attack surface, especially if some repos are public or
+    less actively maintained.
+  check: >
+    Verify via gh api orgs/<ORG>/actions/permissions that
+    enabled_repositories is set to 'selected' (not 'all').
+  fix: >
+    Restrict Actions to selected repositories: Settings → Actions →
+    General → Policies → select 'Enable for select repositories'.
+    Add only repositories that need CI/CD workflows.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000381  # CM-7: Least Functionality
+  nist:
+    - CM-7
+  owasp_cicd: CICD-SEC-1
+  classifier: org_enabled_repositories
+  implemented: true
+  card: 4yh
+
+- id: GHA-029
+  title: "Organization secrets SHOULD be scoped to selected repositories, not all"
+  desc: >
+    Org secrets with visibility set to 'all' are available to every repository
+    in the organization, violating the principle of least privilege. If any
+    repository is compromised, the attacker gains access to all org secrets.
+    Scoping secrets to only the repositories that need them limits blast radius.
+  check: >
+    Verify that no org-level secret has visibility set to 'all'. All org
+    secrets should use 'selected' (with an explicit repo list) or 'private'.
+  fix: >
+    Scope each org secret to only the repositories that reference it:
+    gh secret set SECRET_NAME --org ORG --visibility selected --repos repo1,repo2
+    Use the remediation commands in the org secrets table.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+    - CCI-000183  # IA-5: Protect authenticators
+  nist:
+    - AC-6
+    - IA-5
+  owasp_cicd: CICD-SEC-6
+  classifier: org_secret_scoping
+  implemented: true

@@ -1,0 +1,9 @@
+name: Deprecated command in comment only
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # echo "::set-output name=result::success"
+      - run: echo "hello"

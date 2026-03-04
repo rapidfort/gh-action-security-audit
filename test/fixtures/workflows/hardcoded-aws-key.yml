@@ -1,0 +1,11 @@
+name: Deploy AWS
+on: push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+    steps:
+      - uses: actions/checkout@v4
+      - run: aws s3 ls

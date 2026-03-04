@@ -1,0 +1,9 @@
+name: Build Branch
+on:
+  pull_request_target:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Building ${{ github.head_ref }}"

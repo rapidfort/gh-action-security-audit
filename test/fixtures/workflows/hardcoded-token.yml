@@ -1,0 +1,10 @@
+name: Deploy
+on: push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          curl -H "Authorization: token ghp_abc123def456ghi789jkl012mno345pqr678" https://api.github.com/repos

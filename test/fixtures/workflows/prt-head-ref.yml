@@ -1,0 +1,8 @@
+name: PR Target with head ref
+on: pull_request_target
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Branch is ${{ github.head_ref }}"

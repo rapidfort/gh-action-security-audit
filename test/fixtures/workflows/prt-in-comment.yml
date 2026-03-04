@@ -1,0 +1,12 @@
+name: Build and Test
+on: push
+
+# NOTE: This workflow does NOT use pull_request_target.
+# See prt-checkout-no-guard.yml for the pull_request_target version.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "building"

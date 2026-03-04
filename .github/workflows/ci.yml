@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        run: shellcheck gh-action-security-audit
+
+  shfmt:
+    name: shfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shfmt
+        run: |
+          curl -sS https://webinstall.dev/shfmt | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check formatting
+        run: shfmt -d -i 2 -bn -ci gh-action-security-audit
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bats tests
+        uses: bats-core/bats-action@3.0.0
+        with:
+          support-path: ${{ github.workspace }}/test/test_helper
+          assert-path: ${{ github.workspace }}/test/test_helper
+          tests-path: test/
+          report-formatter: junit
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up test data
+        run: |
+          mkdir -p /tmp/smoke/workflows/test-org/{safe-repo,vuln-repo}
+          cp test/fixtures/workflows/benign-workflow.yml \
+             /tmp/smoke/workflows/test-org/safe-repo/ci.yml
+          cp test/fixtures/workflows/prt-checkout-no-guard.yml \
+             /tmp/smoke/workflows/test-org/vuln-repo/pr-target.yml
+          cp test/fixtures/workflows/unpinned-actions.yml \
+             /tmp/smoke/workflows/test-org/vuln-repo/deps.yml
+
+      - name: Run audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./gh-action-security-audit test-org --local /tmp/smoke \
+            --out /tmp/smoke-report.md \
+            --csv /tmp/smoke-report.csv \
+            --hdf /tmp/smoke-report.json
+
+      - name: Verify outputs
+        run: |
+          test -s /tmp/smoke-report.md || { echo "FAIL: empty MD report"; exit 1; }
+          test -s /tmp/smoke-report.csv || { echo "FAIL: empty CSV report"; exit 1; }
+          test -s /tmp/smoke-report.json || { echo "FAIL: empty HDF report"; exit 1; }
+          grep -q "safe-repo" /tmp/smoke-report.md || { echo "FAIL: safe-repo missing"; exit 1; }
+          grep -q "vuln-repo" /tmp/smoke-report.md || { echo "FAIL: vuln-repo missing"; exit 1; }
+          grep -q "checkout+exec, no guard" /tmp/smoke-report.md || { echo "FAIL: PRT not detected"; exit 1; }

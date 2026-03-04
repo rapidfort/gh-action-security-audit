@@ -1,0 +1,10 @@
+name: Uses deprecated set-env and add-path
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::set-env name=FOO::bar"
+          echo "::add-path::/opt/mybin"

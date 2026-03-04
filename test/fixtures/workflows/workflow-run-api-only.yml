@@ -1,0 +1,11 @@
+name: Notify
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types: [completed]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Build completed with status ${{ github.event.workflow_run.conclusion }}"

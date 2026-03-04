@@ -1,0 +1,12 @@
+name: Handle Comment
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          COMMENT="${{ github.event.comment.body }}"
+          echo "$COMMENT"

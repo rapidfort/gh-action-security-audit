@@ -1,0 +1,11 @@
+name: Download and use artifact
+on: push
+
+jobs:
+  use:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+      - run: ./build-output/run.sh

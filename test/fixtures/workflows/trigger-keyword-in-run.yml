@@ -1,0 +1,8 @@
+name: Build
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This workflow does not use pull_request_target or issue_comment or workflow_run"

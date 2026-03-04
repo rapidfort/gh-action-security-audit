@@ -1,0 +1,8 @@
+name: Write to GITHUB_ENV
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "FOO=bar" >> $GITHUB_ENV

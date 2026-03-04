@@ -1,0 +1,8 @@
+name: Head commit injection
+on: push
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Commit message: ${{ github.event.head_commit.message }}"

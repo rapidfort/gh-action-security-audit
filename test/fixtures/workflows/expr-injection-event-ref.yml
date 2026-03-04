@@ -1,0 +1,9 @@
+name: Event ref injection
+on:
+  create:
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Created ref: ${{ github.event.ref }}"

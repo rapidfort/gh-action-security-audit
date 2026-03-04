@@ -1,0 +1,9 @@
+name: Deploy with environment
+on: push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: docker push myapp:latest

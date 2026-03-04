@@ -1,0 +1,10 @@
+name: Issue Comment Bot
+on: issue_comment
+
+# TODO: Add author_association check before going to production
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Processing comment"

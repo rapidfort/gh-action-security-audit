@@ -258,6 +258,7 @@ _script_preamble() {
     export -f gh
 PREAMBLE
   # Extract helper and classify functions plus analyze_repo
+  sed -n '/^find_workflow_files()/,/^}/p' "$SCRIPT"
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"

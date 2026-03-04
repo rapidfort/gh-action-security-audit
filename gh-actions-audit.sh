@@ -134,6 +134,11 @@ if [ -z "$ORG" ]; then
   exit 1
 fi
 
+if [ -n "$LOCAL_DIR" ] && [ "$CLEANUP" = "1" ]; then
+  warn "--cleanup is ignored when using --local (won't delete your pre-existing files)."
+  CLEANUP=0
+fi
+
 if ! [[ $ORG =~ ^[a-zA-Z0-9_-]+$ ]]; then
   echo "Invalid org name: '$ORG'. GitHub org names may only contain [a-zA-Z0-9_-]." >&2
   exit 1
@@ -226,6 +231,13 @@ handle_cache_cleanup() {
   fi
 }
 
+# --- find_workflow_files: find all workflow YAML files in a directory ---
+# Args: directory
+# Outputs: one file path per line
+find_workflow_files() {
+  find "$1" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null
+}
+
 # --- Preflight ---------------------------------------------------------------
 
 info "Org: $ORG"
@@ -264,7 +276,7 @@ info "Authenticated as: $AUTHED_USER"
 # =============================================================================
 
 if [ -n "$LOCAL_DIR" ]; then
-  wf_count=$(find "$WORKFLOWS_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | wc -l | tr -d ' ')
+  wf_count=$(find_workflow_files "$WORKFLOWS_DIR" | wc -l | tr -d ' ')
   info "Using $wf_count local workflow files from $WORKFLOWS_DIR"
 
   # Discover which repos are present locally
@@ -279,7 +291,7 @@ else
   info "Enumerating non-archived repos with workflows..."
 
   # Get all non-archived repos
-  all_repos=$(gh repo list "$ORG" --limit 1000 --no-archived --json name --jq '.[].name' 2>/dev/null) || {
+  all_repos=$(gh repo list "$ORG" --limit 99999 --no-archived --json name --jq '.[].name' 2>/dev/null) || {
     crit "Failed to list repos for '$ORG'. Check gh auth and org access."
     exit 1
   }
@@ -565,7 +577,7 @@ analyze_repo() {
   local wf_files=()
   while IFS= read -r f; do
     wf_files+=("$f")
-  done < <(find "$repo_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null)
+  done < <(find_workflow_files "$repo_dir")
 
   [ ${#wf_files[@]} -eq 0 ] && return 1
 
@@ -761,7 +773,7 @@ if [ -n "$org_secrets" ]; then
       | while IFS= read -r ref_secret; do
         echo "${ref_secret}|${repo_name}"
       done
-  done < <(find "$WORKFLOWS_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null) >>"$SECRET_MAP_FILE"
+  done < <(find_workflow_files "$WORKFLOWS_DIR") >>"$SECRET_MAP_FILE"
 
   while IFS='|' read -r secret_name visibility; do
     progress "secret: $secret_name"
@@ -788,8 +800,8 @@ if [ -n "$org_secrets" ]; then
     esac
 
     # Look up from pre-built map file
-    referenced_repos=$(grep "^${secret_name}|" "$SECRET_MAP_FILE" 2>/dev/null \
-      | cut -d'|' -f2 | sort -u | paste -sd',' - || true)
+    referenced_repos=$(awk -F'|' -v name="$secret_name" '$1 == name {print $2}' "$SECRET_MAP_FILE" 2>/dev/null \
+      | sort -u | paste -sd',' - || true)
     [ -z "$referenced_repos" ] && referenced_repos="(none)"
 
     # Build remediation command once (used by both md and csv reports)

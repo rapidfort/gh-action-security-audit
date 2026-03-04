@@ -439,7 +439,7 @@
     - SI-10
   owasp_cicd: CICD-SEC-4
   classifier: classify_expr_injection
-  implemented: false
+  implemented: true
   card: auu
 
 - id: GHA-017
@@ -522,9 +522,9 @@
     - SI-10
   owasp_cicd: CICD-SEC-4
   classifier: classify_expr_injection
-  implemented: false
+  implemented: true
   card: 5lj
-  note: "May merge with GHA-016 (auu)"
+  note: "Merged with GHA-016 — shared dangerous_pattern regex"
 
 - id: GHA-020
   title: "Unpinned first-party actions SHOULD be distinguished from third-party"
@@ -577,7 +577,7 @@
     - SI-10
   owasp_cicd: CICD-SEC-4
   classifier: classify_prt
-  implemented: false
+  implemented: true
   card: co0
 
 - id: GHA-022

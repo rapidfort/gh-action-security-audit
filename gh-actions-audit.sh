@@ -518,8 +518,10 @@ classify_expr_injection() {
 
   # Pattern for dangerous user-controlled expressions
   # Includes: github.event.* user-controlled fields, github.head_ref,
-  # inputs.* (workflow_dispatch), github.event.client_payload.* (repository_dispatch)
-  local dangerous_pattern='github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[|client_payload\.)|github\.head_ref|inputs\.'
+  # inputs.* (workflow_dispatch), github.event.client_payload.* (repository_dispatch),
+  # github.event.ref (create/delete triggers), head_commit.message/author,
+  # discussion.title/body, pages[].page_name
+  local dangerous_pattern='github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|review_comment\.body|commits\[|client_payload\.|ref|head_commit\.(message|author\.(name|email))|discussion\.(title|body)|pages\[)|github\.head_ref|inputs\.'
 
   # Find dangerous expressions in run: block content
   local found
@@ -1046,6 +1048,42 @@ _hdf_result_GHA_018() {
   fi
 }
 
+# GHA-016: Additional expression injection contexts
+# Uses same expr_findings as GHA-005 (shared classifier)
+_hdf_result_GHA_016() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No additional dangerous expression contexts found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Additional expression injection contexts|%s' "$detail"
+  fi
+}
+
+# GHA-019: github.event.ref injection
+# Uses same expr_findings as GHA-005 (shared classifier)
+_hdf_result_GHA_019() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No github.event.ref injection found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|github.event.ref injection findings|%s' "$detail"
+  fi
+}
+
+# GHA-021: PRT checkout of untrusted refs
+# Uses same prt_findings as GHA-002 (shared classifier)
+_hdf_result_GHA_021() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No pull_request_target checkout of untrusted refs found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|PRT checkout of untrusted refs|%s' "$detail"
+  fi
+}
+
 # GHA-011: Org default workflow permissions
 # Args: $1=default_wf_perm (e.g., "read" or "write")
 _hdf_result_GHA_011() {
@@ -1158,6 +1196,9 @@ build_hdf_repo_target() {
           GHA-015) result=$(_hdf_result_GHA_015 "${ei_findings[@]}") ;;
           GHA-017) result=$(_hdf_result_GHA_017 "${dc_findings[@]}") ;;
           GHA-018) result=$(_hdf_result_GHA_018 "${kv_findings[@]}") ;;
+          GHA-016) result=$(_hdf_result_GHA_016 "${expr_findings[@]}") ;;
+          GHA-019) result=$(_hdf_result_GHA_019 "${expr_findings[@]}") ;;
+          GHA-021) result=$(_hdf_result_GHA_021 "${prt_findings[@]}") ;;
           *) result="notReviewed|Detection not yet implemented" ;;
         esac
         IFS='|' read -r status code_desc message <<<"$result"

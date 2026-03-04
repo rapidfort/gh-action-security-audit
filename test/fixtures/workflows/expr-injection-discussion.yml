@@ -1,0 +1,10 @@
+name: Discussion injection
+on:
+  discussion:
+    types: [created]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.discussion.title }}"

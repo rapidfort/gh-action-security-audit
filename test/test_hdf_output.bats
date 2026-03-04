@@ -225,7 +225,10 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_014()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_015()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_017()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_016()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_019()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_021()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
 }
 
@@ -553,12 +556,12 @@ _run_hdf_repo_target() {
 
   run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
-  # 14 implemented per-repo checks
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-017 GHA-018; do
+  # 17 implemented per-repo checks
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-021; do
     assert_output --partial "\"$id\""
   done
-  # 9 unimplemented per-repo checks (notReviewed)
-  for id in GHA-016 GHA-019 GHA-020 GHA-021 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
+  # 6 unimplemented per-repo checks (notReviewed)
+  for id in GHA-020 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
     assert_output --partial "\"$id\""
   done
 }
@@ -756,7 +759,7 @@ _run_hdf_org_target() {
   run _run_hdf_org_target "test-org" "read" "false" "selected"
   assert_success
   # Per-repo IDs must NOT appear in org target
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-017 GHA-018; do
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-021; do
     refute_output --partial "\"$id\""
   done
 }

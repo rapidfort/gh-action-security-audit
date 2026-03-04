@@ -290,7 +290,10 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_014()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_015()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_017()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_016()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_019()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_021()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
   sed -n '/^_extract_hdf_status()/,/^}/p' "$SCRIPT"
   sed -n '/^render_md_csv_row()/,/^}/p' "$SCRIPT"
@@ -651,6 +654,24 @@ _run_classify_expr_injection() {
   run _run_classify_expr_injection "$FIXTURES_DIR/workflows/dispatch-safe.yml"
   assert_success
   assert_output ""
+}
+
+@test "classify_expr_injection: discussion.title detected (GHA-016)" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-discussion.yml"
+  assert_success
+  assert_output --partial "discussion."
+}
+
+@test "classify_expr_injection: head_commit.message detected (GHA-016)" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-head-commit.yml"
+  assert_success
+  assert_output --partial "head_commit."
+}
+
+@test "classify_expr_injection: github.event.ref detected (GHA-019)" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-event-ref.yml"
+  assert_success
+  assert_output --partial "ref"
 }
 
 # --- render_md_csv_row integration tests for expression injection ---

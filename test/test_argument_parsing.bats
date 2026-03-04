@@ -4,6 +4,22 @@ setup() {
   load test_helper/common-setup
 }
 
+# =============================================================================
+# Temp file safety — all temp files must be created via mktemp
+# =============================================================================
+
+@test "TABLE_ROWS csv file uses mktemp, not string concatenation" {
+  # The csv companion file must be its own mktemp call, not $TABLE_ROWS.csv
+  run grep -n 'TABLE_ROWS\.csv' "$SCRIPT"
+  # Should NOT find any definition like TABLE_ROWS.csv that's just appending .csv
+  refute_output --partial '$TABLE_ROWS.csv'
+}
+
+@test "AUDIT_DIR uses mktemp -d when not using --local" {
+  run grep -n 'AUDIT_DIR=' "$SCRIPT"
+  assert_output --partial 'mktemp -d'
+}
+
 # --- Help flag ---
 
 @test "--help prints usage and exits 0" {

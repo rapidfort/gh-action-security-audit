@@ -119,8 +119,6 @@ fi
 
 # --- Configuration -----------------------------------------------------------
 
-AUDIT_DIR="/tmp/gh-actions-audit-${ORG}-$(date +%Y%m%d-%H%M%S)"
-
 if [ -n "$LOCAL_DIR" ]; then
   if [ -d "$LOCAL_DIR/workflows" ]; then
     WORKFLOWS_DIR="$LOCAL_DIR/workflows"
@@ -132,6 +130,7 @@ if [ -n "$LOCAL_DIR" ]; then
   fi
   AUDIT_DIR="$(dirname "$WORKFLOWS_DIR")"
 else
+  AUDIT_DIR=$(mktemp -d "/tmp/gh-actions-audit-${ORG}-XXXXXX")
   WORKFLOWS_DIR="$AUDIT_DIR/workflows"
   mkdir -p "$WORKFLOWS_DIR"
 fi
@@ -233,8 +232,9 @@ fi
 
 info "Analyzing workflows..."
 
-# Temp file to accumulate table rows
+# Temp files to accumulate table rows
 TABLE_ROWS=$(mktemp)
+TABLE_ROWS_CSV=$(mktemp)
 
 for repo in "${REPOS[@]}"; do
   repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
@@ -366,7 +366,7 @@ for repo in "${REPOS[@]}"; do
 
   # --- Write rows ---
   echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}" >> "$TABLE_ROWS"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}" >> "$TABLE_ROWS.csv"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}" >> "$TABLE_ROWS_CSV"
   progress "$repo"
 done
 
@@ -622,7 +622,7 @@ if [ -n "$CSV_FILE" ]; then
 
   {
     echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Repo Secrets"
-    sort "$TABLE_ROWS.csv" | while IFS='|' read -r repo perms prt ic secrets; do
+    sort "$TABLE_ROWS_CSV" | while IFS='|' read -r repo perms prt ic secrets; do
       printf '%s,%s,%s,%s,%s\n' \
         "$(csv_field "$repo")" \
         "$(csv_field "$perms")" \
@@ -659,7 +659,7 @@ fi
 
 # --- Cleanup ---
 
-rm -f "$TABLE_ROWS" "$TABLE_ROWS.csv" "$ORG_SECRETS_FILE"
+rm -f "$TABLE_ROWS" "$TABLE_ROWS_CSV" "$ORG_SECRETS_FILE"
 
 info "Report written to: $OUT_FILE"
 

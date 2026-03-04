@@ -131,13 +131,13 @@ _run_require_arg() {
   return $rc
 }
 
-@test "require_arg: missing arg exits 1 with error" {
+@test "require_arg: missing arg exits with error" {
   run _run_require_arg 'require_arg "--local" "" "a directory path" "/path/to/dir"'
   assert_failure
   assert_output --partial "Error: --local requires a directory path"
 }
 
-@test "require_arg: flag-like arg exits 1 with error" {
+@test "require_arg: flag-like arg exits with error" {
   run _run_require_arg 'require_arg "--out" "--csv" "a filename" "report.md"'
   assert_failure
   assert_output --partial "Error: --out requires a filename"
@@ -163,25 +163,39 @@ _run_require_arg() {
   assert_output --partial "GitHub Actions Security Audit"
 }
 
+# --- Version flag ---
+
+@test "--version prints version and exits 0" {
+  run bash "$SCRIPT" --version
+  assert_success
+  assert_output "gh-action-security-audit 0.1.0"
+}
+
+@test "-V prints version and exits 0" {
+  run bash "$SCRIPT" -V
+  assert_success
+  assert_output "gh-action-security-audit 0.1.0"
+}
+
 # --- Missing org ---
 
-@test "no arguments prints usage to stderr and exits 1" {
+@test "no arguments prints usage to stderr and exits with code 2" {
   run bash "$SCRIPT"
-  assert_failure
+  [ "$status" -eq 2 ]
   assert_output --partial "Usage:"
 }
 
 # --- Unknown option ---
 
-@test "unknown option exits 1" {
+@test "unknown option exits with code 2" {
   run bash "$SCRIPT" my-org --bogus
-  assert_failure
+  [ "$status" -eq 2 ]
   assert_output --partial "Unknown option"
 }
 
 # --- Duplicate org ---
 
-@test "two positional args exits 1" {
+@test "two positional args exits with error" {
   run bash "$SCRIPT" org1 org2
   assert_failure
   assert_output --partial "Only one org at a time"
@@ -210,15 +224,15 @@ _run_require_arg() {
 
 # --- --local requires a directory ---
 
-@test "--local without argument exits 1" {
+@test "--local without argument exits with error" {
   run bash "$SCRIPT" my-org --local
   assert_failure
   assert_output --partial "requires a directory"
 }
 
-# --- --local with nonexistent directory exits 1 ---
+# --- --local with nonexistent directory exits with error ---
 
-@test "--local with nonexistent dir exits 1" {
+@test "--local with nonexistent dir exits with error" {
   run bash "$SCRIPT" my-org --local /tmp/nonexistent-dir-$$
   assert_failure
   assert_output --partial "does not exist"
@@ -226,7 +240,7 @@ _run_require_arg() {
 
 # --- --out requires a filename ---
 
-@test "--out without argument exits 1" {
+@test "--out without argument exits with error" {
   run bash "$SCRIPT" my-org --out
   assert_failure
   assert_output --partial "requires a filename"
@@ -234,7 +248,7 @@ _run_require_arg() {
 
 # --- --csv requires a filename ---
 
-@test "--csv without argument exits 1" {
+@test "--csv without argument exits with error" {
   run bash "$SCRIPT" my-org --csv
   assert_failure
   assert_output --partial "requires a filename"
@@ -242,7 +256,7 @@ _run_require_arg() {
 
 # --- --hdf requires a filename ---
 
-@test "--hdf without argument exits 1" {
+@test "--hdf without argument exits with error" {
   run bash "$SCRIPT" my-org --hdf
   assert_failure
   assert_output --partial "requires a filename"

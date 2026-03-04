@@ -16,17 +16,18 @@ brew install bats-support bats-assert bats-file
 npm install -g bats bats-support bats-assert bats-file
 ```
 
-Install [ShellCheck](https://www.shellcheck.net/) for linting:
+Install [ShellCheck](https://www.shellcheck.net/) and [shfmt](https://github.com/mvdan/sh):
 
 ```bash
 # macOS
-brew install shellcheck
+brew install shellcheck shfmt
 
 # Ubuntu/Debian
 apt-get install shellcheck
+curl -sS https://webinstall.dev/shfmt | bash
 ```
 
-Or use the convenience target:
+Or use the convenience target (installs everything):
 
 ```bash
 make test-deps
@@ -37,7 +38,9 @@ make test-deps
 ```bash
 make test          # Run all bats tests
 make lint          # Run shellcheck on gh-actions-audit.sh
-make check         # Run both lint and test
+make fmt-check     # Check formatting (no changes)
+make fmt           # Auto-format with shfmt
+make check         # Run lint + format check + test (CI equivalent)
 ```
 
 Run a single test file:
@@ -104,11 +107,25 @@ The mock intercepts `gh` calls by prepending a stub script to `PATH`. It returns
 2. **Green**: Fix the script so the test passes (or invert the bug test assertion).
 3. **Refactor**: Clean up without breaking tests.
 
+## Code Quality Standards
+
+All of the following must pass before code is merged. `make check` runs them all.
+
+### ShellCheck (static analysis)
+Zero findings required. ShellCheck catches bugs, security issues, and portability problems. Configuration is in `.shellcheckrc`.
+
+### shfmt (formatting)
+All bash scripts must be formatted with shfmt. Settings: 2-space indent (`-i 2`), binary ops on next line (`-bn`), case body indented (`-ci`). Run `make fmt` to auto-format, `make fmt-check` to verify.
+
+### bats-core (tests)
+All tests must pass. Tests cover argument parsing, workflow analysis heuristics, secret mapping, and report generation.
+
 ## CI Pipeline
 
 The `.github/workflows/ci.yml` pipeline runs on every push and PR:
 
 - **ShellCheck** job: lints `gh-actions-audit.sh`
+- **shfmt** job: verifies formatting matches `shfmt -i 2 -bn -ci`
 - **Test** job: runs bats tests on ubuntu-latest and macos-latest via `bats-core/bats-action`
 
 ## Mocking Strategy

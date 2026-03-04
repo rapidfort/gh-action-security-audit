@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **We own this code. There is no such thing as a "pre-existing" issue.** Every warning, lint finding, or tool error must be fixed immediately. Never dismiss, defer, or label something as "expected."
 - **Fix everything you find.** If shellcheck, bats, or any tool reports a problem, fix it in the same pass. Zero findings is the only acceptable state.
-- **`make check` (lint + test) must pass clean before any work is considered done.**
+- **`make check` (lint + format check + test) must pass clean before any work is considered done.**
+- **Format with shfmt** before committing: `make fmt`. Settings: 2-space indent, binary ops on next line, case body indented (`shfmt -i 2 -bn -ci`).
+- **Never reference Claude/AI in git commits or history.** Use `git commit -s` with the user's identity.
 
 ## Project Overview
 
@@ -48,10 +50,12 @@ Key implementation details:
 Tests use [bats-core](https://github.com/bats-core/bats-core) with bats-support and bats-assert. See [TESTING.md](TESTING.md) for full details.
 
 ```bash
-make test-deps     # Install bats + helpers
+make test-deps     # Install bats + helpers + shellcheck + shfmt
 make test          # Run bats tests
 make lint          # Run shellcheck
-make check         # Both lint + test
+make fmt           # Auto-format with shfmt
+make fmt-check     # Verify formatting (no changes)
+make check         # All three: lint + format check + test
 ```
 
 Test structure:

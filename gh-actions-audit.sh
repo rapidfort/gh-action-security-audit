@@ -84,35 +84,46 @@ while [[ $# -gt 0 ]]; do
         echo "Usage: $0 <ORG> --local /path/to/previous/audit/dir" >&2
         exit 1
       fi
-      LOCAL_DIR="$2"; shift 2 ;;
+      LOCAL_DIR="$2"
+      shift 2
+      ;;
     --out)
       if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
         echo "Error: --out requires a filename." >&2
         echo "Usage: $0 <ORG> --out report.md" >&2
         exit 1
       fi
-      OUT_FILE="$2"; shift 2 ;;
+      OUT_FILE="$2"
+      shift 2
+      ;;
     --csv)
       if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
         echo "Error: --csv requires a filename." >&2
         echo "Usage: $0 <ORG> --csv report.csv" >&2
         exit 1
       fi
-      CSV_FILE="$2"; shift 2 ;;
+      CSV_FILE="$2"
+      shift 2
+      ;;
     --cleanup)
-      CLEANUP=1; shift ;;
-    -h|--help)
+      CLEANUP=1
+      shift
+      ;;
+    -h | --help)
       # Print comment block from line 2 until the first non-comment line
       awk 'NR==1{next} /^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
       exit 0
       ;;
     -*)
-      echo "Unknown option: $1" >&2; exit 1 ;;
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
     *)
       if [ -z "$ORG" ]; then
         ORG="$1"
       else
-        echo "Only one org at a time. Got '$1' after '$ORG'." >&2; exit 1
+        echo "Only one org at a time. Got '$1' after '$ORG'." >&2
+        exit 1
       fi
       shift
       ;;
@@ -146,16 +157,25 @@ fi
 
 # ANSI colors (disabled if not a terminal)
 if [ -t 1 ]; then
-  RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-  CYAN='\033[0;36m'; DIM='\033[2m'; RESET='\033[0m'
+  RED='\033[0;31m'
+  YELLOW='\033[1;33m'
+  GREEN='\033[0;32m'
+  CYAN='\033[0;36m'
+  DIM='\033[2m'
+  RESET='\033[0m'
 else
-  RED=''; YELLOW=''; GREEN=''; CYAN=''; DIM=''; RESET=''
+  RED=''
+  YELLOW=''
+  GREEN=''
+  CYAN=''
+  DIM=''
+  RESET=''
 fi
 
-info()  { printf "${CYAN}[INFO]${RESET}  %s\n" "$*"; }
-warn()  { printf "${YELLOW}[WARN]${RESET}  %s\n" "$*"; }
-crit()  { printf "${RED}[CRIT]${RESET}  %s\n" "$*"; }
-ok()    { printf "${GREEN}[ OK ]${RESET}  %s\n" "$*"; }
+info() { printf "${CYAN}[INFO]${RESET}  %s\n" "$*"; }
+warn() { printf "${YELLOW}[WARN]${RESET}  %s\n" "$*"; }
+crit() { printf "${RED}[CRIT]${RESET}  %s\n" "$*"; }
+ok() { printf "${GREEN}[ OK ]${RESET}  %s\n" "$*"; }
 progress() { printf "${DIM}  ... %s${RESET}\r" "$*"; }
 
 # --- Preflight ---------------------------------------------------------------
@@ -232,7 +252,7 @@ else
     for wf in $wf_list; do
       content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || true)
       if [ -n "$content" ]; then
-        echo "$content" | "${BASE64_DECODE[@]}" > "$repo_dir/$wf" 2>/dev/null || true
+        echo "$content" | "${BASE64_DECODE[@]}" >"$repo_dir/$wf" 2>/dev/null || true
         downloaded=$((downloaded + 1))
       fi
     done
@@ -241,7 +261,7 @@ else
     sleep 0.1
   done
 
-  printf "%-80s\n" " "  # clear progress line
+  printf "%-80s\n" " " # clear progress line
   info "Downloaded $downloaded workflow files from ${#REPOS[@]} repos ($skipped_no_wf repos had no workflows)"
 fi
 
@@ -337,7 +357,7 @@ for repo in "${REPOS[@]}"; do
   else
     prt_cell=$(printf '%s' "${prt_wfs[0]}")
     prt_csv=$(printf '%s' "${prt_wfs_csv[0]}")
-    for ((i=1; i<${#prt_wfs[@]}; i++)); do
+    for ((i = 1; i < ${#prt_wfs[@]}; i++)); do
       prt_cell+=$(printf '<br/>%s' "${prt_wfs[$i]}")
       prt_csv+=$(printf '; %s' "${prt_wfs_csv[$i]}")
     done
@@ -368,7 +388,7 @@ for repo in "${REPOS[@]}"; do
   else
     ic_cell=$(printf '%s' "${ic_wfs[0]}")
     ic_csv=$(printf '%s' "${ic_wfs_csv[0]}")
-    for ((i=1; i<${#ic_wfs[@]}; i++)); do
+    for ((i = 1; i < ${#ic_wfs[@]}; i++)); do
       ic_cell+=$(printf '<br/>%s' "${ic_wfs[$i]}")
       ic_csv+=$(printf '; %s' "${ic_wfs_csv[$i]}")
     done
@@ -384,12 +404,12 @@ for repo in "${REPOS[@]}"; do
   fi
 
   # --- Write rows ---
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}" >> "$TABLE_ROWS"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}" >> "$TABLE_ROWS_CSV"
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}" >>"$TABLE_ROWS"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}" >>"$TABLE_ROWS_CSV"
   progress "$repo"
 done
 
-printf "%-80s\n" " "  # clear progress line
+printf "%-80s\n" " " # clear progress line
 info "Workflow analysis complete."
 
 # =============================================================================
@@ -438,11 +458,11 @@ if [ -n "$org_secrets" ]; then
       | paste -sd',' - || true)
     [ -z "$referenced_repos" ] && referenced_repos="(none)"
 
-    echo "${secret_name}|${vis_display}|${configured_repos}|${referenced_repos}" >> "$ORG_SECRETS_FILE"
-  done <<< "$org_secrets"
+    echo "${secret_name}|${vis_display}|${configured_repos}|${referenced_repos}" >>"$ORG_SECRETS_FILE"
+  done <<<"$org_secrets"
 fi
 
-printf "%-80s\n" " "  # clear progress line
+printf "%-80s\n" " " # clear progress line
 info "Org secrets enumeration complete."
 
 # =============================================================================
@@ -464,7 +484,7 @@ allowed_actions=$(echo "$org_actions_perms" | python3 -c "import sys,json; d=jso
 
 info "Writing report to $OUT_FILE..."
 
-cat > "$OUT_FILE" << EOF
+cat >"$OUT_FILE" <<EOF
 # GitHub Actions Security Audit: \`$ORG\`
 
 **Date:** $(date -u '+%Y-%m-%d %H:%M UTC')
@@ -483,32 +503,32 @@ cat > "$OUT_FILE" << EOF
 EOF
 
 {
-# Default workflow permissions
-if [ "$default_wf_perm" = "write" ]; then
-  echo "| Default workflow permissions | \`write\` | Set to \`read\`. Workflows needing write access should declare explicit \`permissions:\` blocks. |"
-elif [ "$default_wf_perm" = "read" ]; then
-  echo "| Default workflow permissions | \`read\` | No action needed. |"
-else
-  echo "| Default workflow permissions | \`$default_wf_perm\` | Could not determine (may need admin scope). |"
-fi
+  # Default workflow permissions
+  if [ "$default_wf_perm" = "write" ]; then
+    echo "| Default workflow permissions | \`write\` | Set to \`read\`. Workflows needing write access should declare explicit \`permissions:\` blocks. |"
+  elif [ "$default_wf_perm" = "read" ]; then
+    echo "| Default workflow permissions | \`read\` | No action needed. |"
+  else
+    echo "| Default workflow permissions | \`$default_wf_perm\` | Could not determine (may need admin scope). |"
+  fi
 
-# Can approve PRs
-if [ "$can_approve_prs" = "True" ] || [ "$can_approve_prs" = "true" ]; then
-  echo "| Workflows can approve PRs | Yes | Consider disabling unless required. |"
-else
-  echo "| Workflows can approve PRs | No | No action needed. |"
-fi
+  # Can approve PRs
+  if [ "$can_approve_prs" = "True" ] || [ "$can_approve_prs" = "true" ]; then
+    echo "| Workflows can approve PRs | Yes | Consider disabling unless required. |"
+  else
+    echo "| Workflows can approve PRs | No | No action needed. |"
+  fi
 
-# Allowed actions
-case "$allowed_actions" in
-  all) echo "| Allowed actions | All | Consider restricting to verified creators or a selected list. |" ;;
-  selected) echo "| Allowed actions | Selected | No action needed. |" ;;
-  *) echo "| Allowed actions | \`$allowed_actions\` | — |" ;;
-esac
+  # Allowed actions
+  case "$allowed_actions" in
+    all) echo "| Allowed actions | All | Consider restricting to verified creators or a selected list. |" ;;
+    selected) echo "| Allowed actions | Selected | No action needed. |" ;;
+    *) echo "| Allowed actions | \`$allowed_actions\` | — |" ;;
+  esac
 
-# --- Per-repo table ---
+  # --- Per-repo table ---
 
-cat << 'PERREPO'
+  cat <<'PERREPO'
 
 ## Per-Repository Audit
 
@@ -528,16 +548,16 @@ Columns:
 
 PERREPO
 
-echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |"
-echo "|------------|-------------|----------------------|-----------------|--------------|"
+  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |"
+  echo "|------------|-------------|----------------------|-----------------|--------------|"
 
-sort "$TABLE_ROWS" | while IFS='|' read -r repo perms prt ic secrets; do
-  echo "| \`$repo\` | $perms | $prt | $ic | $secrets |"
-done
+  sort "$TABLE_ROWS" | while IFS='|' read -r repo perms prt ic secrets; do
+    echo "| \`$repo\` | $perms | $prt | $ic | $secrets |"
+  done
 
-# --- Org secrets section ---
+  # --- Org secrets section ---
 
-cat << 'ORGSECRETS'
+  cat <<'ORGSECRETS'
 
 ## Org-Level Secrets
 
@@ -555,34 +575,34 @@ Columns:
 
 ORGSECRETS
 
-org_secret_count=$(wc -l < "$ORG_SECRETS_FILE" | tr -d ' ')
+  org_secret_count=$(wc -l <"$ORG_SECRETS_FILE" | tr -d ' ')
 
-if [ "$org_secret_count" -eq 0 ]; then
-  echo "No org-level secrets found (or insufficient permissions to list them)."
-else
-  echo "| Secret Name | Visibility | Configured Access | Referenced In Workflows | Suggested Command |"
-  echo "|-------------|------------|-------------------|------------------------|-------------------|"
+  if [ "$org_secret_count" -eq 0 ]; then
+    echo "No org-level secrets found (or insufficient permissions to list them)."
+  else
+    echo "| Secret Name | Visibility | Configured Access | Referenced In Workflows | Suggested Command |"
+    echo "|-------------|------------|-------------------|------------------------|-------------------|"
 
-  sort "$ORG_SECRETS_FILE" | while IFS='|' read -r name vis configured referenced; do
-    case "$vis" in
-      "All repositories")
-        if [ "$referenced" = "(none)" ]; then
-          cmd="Unreferenced — verify if still needed"
-        else
-          cmd="\`gh secret set $name --org $ORG --visibility selected --repos $referenced\`"
-        fi
-        echo "| \`$name\` | **All repositories** | (all) | $referenced | $cmd |"
-        ;;
-      *)
-        echo "| \`$name\` | $vis | $configured | $referenced | — |"
-        ;;
-    esac
-  done
-fi
+    sort "$ORG_SECRETS_FILE" | while IFS='|' read -r name vis configured referenced; do
+      case "$vis" in
+        "All repositories")
+          if [ "$referenced" = "(none)" ]; then
+            cmd="Unreferenced — verify if still needed"
+          else
+            cmd="\`gh secret set $name --org $ORG --visibility selected --repos $referenced\`"
+          fi
+          echo "| \`$name\` | **All repositories** | (all) | $referenced | $cmd |"
+          ;;
+        *)
+          echo "| \`$name\` | $vis | $configured | $referenced | — |"
+          ;;
+      esac
+    done
+  fi
 
-# --- Guidance ---
+  # --- Guidance ---
 
-cat << 'GUIDANCE'
+  cat <<'GUIDANCE'
 
 ## Review Guidance
 
@@ -620,7 +640,7 @@ events from forks. It provides **no protection** for:
 - **No checkout**: Workflows that only make API calls (approve, label, merge) without checking
   out fork code are not vulnerable to code injection
 GUIDANCE
-} >> "$OUT_FILE"
+} >>"$OUT_FILE"
 
 # --- CSV output ---
 
@@ -632,7 +652,7 @@ if [ -n "$CSV_FILE" ]; then
     local val="$1"
     # If the field contains commas, quotes, or newlines, quote it
     if [[ "$val" == *,* ]] || [[ "$val" == *\"* ]] || [[ "$val" == *$'\n'* ]]; then
-      val="${val//\"/\"\"}"  # escape double quotes
+      val="${val//\"/\"\"}" # escape double quotes
       printf '"%s"' "$val"
     else
       printf '%s' "$val"
@@ -671,7 +691,7 @@ if [ -n "$CSV_FILE" ]; then
           "$(csv_field "$cmd")"
       done
     fi
-  } > "$CSV_FILE"
+  } >"$CSV_FILE"
 
   info "CSV written to: $CSV_FILE"
 fi

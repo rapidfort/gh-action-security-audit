@@ -18,6 +18,18 @@ jobs:
       - name: Run ShellCheck
         run: shellcheck gh-actions-audit.sh
 
+  shfmt:
+    name: shfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shfmt
+        run: |
+          curl -sS https://webinstall.dev/shfmt | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check formatting
+        run: shfmt -d -i 2 -bn -ci gh-actions-audit.sh
+
   test:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

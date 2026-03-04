@@ -104,8 +104,9 @@ See [TESTING.md](TESTING.md) for the full testing guide.
 Quick start:
 
 ```bash
-make test-deps     # Install bats-core + helpers
-make check         # Run shellcheck + bats tests
+make test-deps     # Install bats-core, shellcheck, shfmt, and helpers
+make check         # Run shellcheck + shfmt format check + bats tests
+make fmt           # Auto-format with shfmt
 ```
 
 ### Contributing

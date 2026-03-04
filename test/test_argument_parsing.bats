@@ -33,6 +33,26 @@ setup() {
   assert_output --partial 'ORG_SECRETS_FILE'
 }
 
+@test "preflight checks for python3 availability" {
+  run grep -n 'command -v python3' "$SCRIPT"
+  assert_success
+  assert_output --partial 'python3'
+}
+
+@test "gh api calls for org settings warn on failure instead of silent fallback" {
+  # Phase 4 org settings API calls should use warn() on failure, not just
+  # silently fall back to 'unknown' or '{}'
+  run grep -A2 'gh api "orgs/\$ORG/actions/permissions' "$SCRIPT"
+  assert_success
+  assert_output --partial 'warn'
+}
+
+@test "gh api call for org secrets warns on failure" {
+  run grep -A2 'gh api "orgs/\$ORG/actions/secrets"' "$SCRIPT"
+  assert_success
+  assert_output --partial 'warn'
+}
+
 @test "base64 decode uses portable detection, not hardcoded -d" {
   # Stock macOS base64 uses -D or --decode, not -d (which is GNU-only).
   # The script should detect the correct flag via BASE64_DECODE array.
@@ -80,6 +100,27 @@ setup() {
   run bash "$SCRIPT" org1 org2
   assert_failure
   assert_output --partial "Only one org at a time"
+}
+
+# --- ORG name validation ---
+
+@test "ORG with slashes is rejected" {
+  run bash "$SCRIPT" "../../etc"
+  assert_failure
+  assert_output --partial "Invalid org name"
+}
+
+@test "ORG with spaces is rejected" {
+  run bash "$SCRIPT" "my org"
+  assert_failure
+  assert_output --partial "Invalid org name"
+}
+
+@test "valid ORG names are accepted (alphanumeric, hyphen, underscore)" {
+  # This should pass validation but fail later at gh auth — we just check it doesn't
+  # fail with "Invalid org name"
+  run bash "$SCRIPT" "my-org_123"
+  refute_output --partial "Invalid org name"
 }
 
 # --- --local requires a directory ---

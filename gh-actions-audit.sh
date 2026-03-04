@@ -135,6 +135,11 @@ if [ -z "$ORG" ]; then
   exit 1
 fi
 
+if ! [[ $ORG =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Invalid org name: '$ORG'. GitHub org names may only contain [a-zA-Z0-9_-]." >&2
+  exit 1
+fi
+
 # --- Configuration -----------------------------------------------------------
 
 if [ -n "$LOCAL_DIR" ]; then
@@ -193,6 +198,11 @@ if ! gh auth status &>/dev/null; then
   exit 1
 fi
 
+if ! command -v python3 &>/dev/null; then
+  crit "'python3' not found. Install Python 3 and ensure 'python3' is in PATH."
+  exit 1
+fi
+
 # Detect portable base64 decode flag (GNU: -d, macOS: -D)
 if echo "dGVzdA==" | base64 --decode &>/dev/null; then
   BASE64_DECODE=(base64 --decode)
@@ -205,7 +215,10 @@ else
   exit 1
 fi
 
-AUTHED_USER=$(gh api user --jq '.login' 2>/dev/null || echo "unknown")
+AUTHED_USER=$(gh api user --jq '.login' 2>/dev/null) || {
+  warn "Could not determine authenticated user."
+  AUTHED_USER="unknown"
+}
 info "Authenticated as: $AUTHED_USER"
 
 # =============================================================================
@@ -396,7 +409,10 @@ for repo in "${REPOS[@]}"; do
 
   # --- Repo secrets ---
   secrets_cell=""
-  secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null || echo "")
+  secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
+    warn "Could not fetch secrets for $repo (may lack repo admin access)."
+    secret_names=""
+  }
   if [ -z "$secret_names" ]; then
     secrets_cell="(none)"
   else
@@ -423,7 +439,10 @@ info "Fetching org-level secrets..."
 # referenced_repos = repos whose workflows actually reference secrets.SECRET_NAME
 ORG_SECRETS_FILE=$(mktemp)
 
-org_secrets=$(gh api "orgs/$ORG/actions/secrets" --paginate --jq '.secrets[] | "\(.name)|\(.visibility)"' 2>/dev/null || echo "")
+org_secrets=$(gh api "orgs/$ORG/actions/secrets" --paginate --jq '.secrets[] | "\(.name)|\(.visibility)"' 2>/dev/null) || {
+  warn "Could not fetch org secrets (check admin:org scope). Skipping org secret analysis."
+  org_secrets=""
+}
 
 if [ -n "$org_secrets" ]; then
   while IFS='|' read -r secret_name visibility; do
@@ -471,11 +490,17 @@ info "Org secrets enumeration complete."
 
 info "Fetching org-level Actions settings..."
 
-org_wf_perms=$(gh api "orgs/$ORG/actions/permissions/workflow" 2>/dev/null || echo '{}')
+org_wf_perms=$(gh api "orgs/$ORG/actions/permissions/workflow" 2>/dev/null) || {
+  warn "Could not fetch org workflow permissions (check admin:org scope)."
+  org_wf_perms='{}'
+}
 default_wf_perm=$(echo "$org_wf_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('default_workflow_permissions','unknown'))" 2>/dev/null || echo "unknown")
 can_approve_prs=$(echo "$org_wf_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('can_approve_pull_request_reviews', 'unknown'))" 2>/dev/null || echo "unknown")
 
-org_actions_perms=$(gh api "orgs/$ORG/actions/permissions" 2>/dev/null || echo '{}')
+org_actions_perms=$(gh api "orgs/$ORG/actions/permissions" 2>/dev/null) || {
+  warn "Could not fetch org actions permissions (check admin:org scope)."
+  org_actions_perms='{}'
+}
 allowed_actions=$(echo "$org_actions_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('allowed_actions','unknown'))" 2>/dev/null || echo "unknown")
 
 # =============================================================================

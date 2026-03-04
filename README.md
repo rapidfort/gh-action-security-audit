@@ -107,7 +107,7 @@ gh action-security-audit <ORG> [OPTIONS]
 |------|-------------|
 | `--out FILE` | Path for markdown report output. Default: `./<ORG>-actions-audit.md` |
 | `--csv FILE` | Path for CSV report output. Omit to skip CSV generation. |
-| `--hdf FILE` | Path for HDF v2 JSON report output (for MITRE Heimdall). |
+| `--hdf FILE` | Path for HDF v2 JSON report output. |
 | `--repo REPO` | Audit a single repository instead of the entire org. |
 | `--local DIR` | Reuse previously downloaded workflow files instead of re-fetching from the API. |
 | `--cleanup` | Delete cached workflow files after the run completes. |

@@ -312,13 +312,21 @@ info "Org: $ORG"
 info "Report output: $OUT_FILE"
 
 if ! command -v gh &>/dev/null; then
-  crit "'gh' CLI not found. Install from https://cli.github.com/"
-  exit 1
+  if [ -z "$LOCAL_DIR" ]; then
+    crit "'gh' CLI not found. Install from https://cli.github.com/"
+    exit 1
+  else
+    warn "'gh' CLI not found. Org secrets and settings will be unavailable."
+  fi
 fi
 
-if ! gh auth status &>/dev/null; then
-  crit "'gh' is not authenticated. Run 'gh auth login' first."
-  exit 1
+if command -v gh &>/dev/null && ! gh auth status &>/dev/null; then
+  if [ -z "$LOCAL_DIR" ]; then
+    crit "'gh' is not authenticated. Run 'gh auth login' first."
+    exit 1
+  else
+    warn "'gh' is not authenticated. Org secrets and settings will be unavailable."
+  fi
 fi
 
 # Detect portable base64 decode flag (GNU: -d, macOS: -D)

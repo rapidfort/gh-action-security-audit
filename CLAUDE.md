@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. It produces markdown and optional CSV reports. Runtime dependencies: `bash` (4.0+), `python3`, `gh` CLI, and standard Unix tools.
+This is a single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. It produces markdown and optional CSV reports. Runtime dependencies: `bash` (4.0+), `gh` CLI, and standard Unix tools.
 
 ## Running the Script
 
@@ -36,7 +36,7 @@ The entire tool is a single bash script (`gh-actions-audit.sh`, ~700 lines) orga
 1. **Phase 1 (Download)** — Enumerates org repos via `gh repo list`, downloads `.github/workflows/*.yml` files via GitHub API. Skipped with `--local`.
 2. **Phase 2 (Per-repo analysis)** — Scans each workflow file for: explicit `permissions:` blocks, `pull_request_target` triggers (sub-classified by risk: API-only, checkout+guard, checkout+exec/no guard), `issue_comment` triggers (with/without author gates), and repo-level secret names.
 3. **Phase 3 (Org secrets)** — Lists org-level secrets, maps each to repos that reference it in workflows via grep, generates `gh secret set` remediation commands for overly broad secrets.
-4. **Phase 4 (Org settings)** — Fetches default workflow token permissions, PR approval policy, allowed actions policy via `gh api`. Uses `python3` for JSON parsing.
+4. **Phase 4 (Org settings)** — Fetches default workflow token permissions, PR approval policy, allowed actions policy via `gh api --jq`.
 5. **Phase 5 (Report)** — Writes markdown report (and optional CSV) using heredocs and pipe-delimited temp files.
 
 Key implementation details:

@@ -33,12 +33,6 @@ setup() {
   assert_output --partial 'ORG_SECRETS_FILE'
 }
 
-@test "preflight checks for python3 availability" {
-  run grep -n 'command -v python3' "$SCRIPT"
-  assert_success
-  assert_output --partial 'python3'
-}
-
 @test "gh api calls for org settings warn on failure instead of silent fallback" {
   # Phase 4 org settings API calls should use warn() on failure, not just
   # silently fall back to 'unknown' or '{}'
@@ -67,6 +61,12 @@ setup() {
 @test "warns when repo list hits 1000 limit" {
   run grep -c 'warn.*1000 limit\|1000.*warn' "$SCRIPT"
   assert_success
+}
+
+@test "script does not use python3 for JSON parsing" {
+  # All JSON parsing should use gh api --jq, not python3
+  run grep -n 'python3' "$SCRIPT"
+  assert_failure
 }
 
 @test "base64 decode uses portable detection, not hardcoded -d" {

@@ -198,11 +198,6 @@ if ! gh auth status &>/dev/null; then
   exit 1
 fi
 
-if ! command -v python3 &>/dev/null; then
-  crit "'python3' not found. Install Python 3 and ensure 'python3' is in PATH."
-  exit 1
-fi
-
 # Detect portable base64 decode flag (GNU: -d, macOS: -D)
 if echo "dGVzdA==" | base64 --decode &>/dev/null; then
   BASE64_DECODE=(base64 --decode)
@@ -498,18 +493,18 @@ info "Org secrets enumeration complete."
 
 info "Fetching org-level Actions settings..."
 
-org_wf_perms=$(gh api "orgs/$ORG/actions/permissions/workflow" 2>/dev/null) || {
+default_wf_perm=$(gh api "orgs/$ORG/actions/permissions/workflow" --jq '.default_workflow_permissions // "unknown"' 2>/dev/null) || {
   warn "Could not fetch org workflow permissions (check admin:org scope)."
-  org_wf_perms='{}'
+  default_wf_perm="unknown"
 }
-default_wf_perm=$(echo "$org_wf_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('default_workflow_permissions','unknown'))" 2>/dev/null || echo "unknown")
-can_approve_prs=$(echo "$org_wf_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('can_approve_pull_request_reviews', 'unknown'))" 2>/dev/null || echo "unknown")
-
-org_actions_perms=$(gh api "orgs/$ORG/actions/permissions" 2>/dev/null) || {
+can_approve_prs=$(gh api "orgs/$ORG/actions/permissions/workflow" --jq '.can_approve_pull_request_reviews // "unknown"' 2>/dev/null) || {
+  warn "Could not fetch org PR approval setting (check admin:org scope)."
+  can_approve_prs="unknown"
+}
+allowed_actions=$(gh api "orgs/$ORG/actions/permissions" --jq '.allowed_actions // "unknown"' 2>/dev/null) || {
   warn "Could not fetch org actions permissions (check admin:org scope)."
-  org_actions_perms='{}'
+  allowed_actions="unknown"
 }
-allowed_actions=$(echo "$org_actions_perms" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('allowed_actions','unknown'))" 2>/dev/null || echo "unknown")
 
 # =============================================================================
 # PHASE 5: Write the report

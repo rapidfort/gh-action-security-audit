@@ -131,6 +131,5 @@ The `.github/workflows/ci.yml` pipeline runs on every push and PR:
 ## Mocking Strategy
 
 - **`gh` CLI**: Mocked via PATH stubs (returns canned JSON responses)
-- **`python3`**: Runs for real (deterministic JSON parsing, no external state)
 - **File I/O**: Uses fixture files and temp dirs (cleaned up in teardown)
 - **Network**: No real API calls in tests — all `gh api` calls are intercepted by the mock

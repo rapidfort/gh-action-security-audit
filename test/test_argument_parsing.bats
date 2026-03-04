@@ -53,6 +53,22 @@ setup() {
   assert_output --partial 'warn'
 }
 
+@test "repo list uses while-read loop, not for-in word splitting" {
+  # for repo in $all_repos is unsafe with spaces; must use while read
+  run grep -n 'for repo in \$all_repos' "$SCRIPT"
+  assert_failure
+}
+
+@test "workflow list uses while-read loop, not for-in word splitting" {
+  run grep -n 'for wf in \$wf_list' "$SCRIPT"
+  assert_failure
+}
+
+@test "warns when repo list hits 1000 limit" {
+  run grep -c 'warn.*1000 limit\|1000.*warn' "$SCRIPT"
+  assert_success
+}
+
 @test "base64 decode uses portable detection, not hardcoded -d" {
   # Stock macOS base64 uses -D or --decode, not -d (which is GNU-only).
   # The script should detect the correct flag via BASE64_DECODE array.

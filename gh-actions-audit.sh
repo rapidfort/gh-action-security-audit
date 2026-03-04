@@ -243,13 +243,19 @@ else
   # Get all non-archived repos
   all_repos=$(gh repo list "$ORG" --limit 1000 --no-archived --json name --jq '.[].name' 2>/dev/null)
   total_repos=$(echo "$all_repos" | grep -c . || echo 0)
+
+  if [ "$total_repos" -ge 1000 ]; then
+    warn "Repo list hit 1000 limit — some repos may be missing from the audit."
+  fi
+
   info "Found $total_repos non-archived repos. Downloading workflows..."
 
   REPOS=()
   downloaded=0
   skipped_no_wf=0
 
-  for repo in $all_repos; do
+  while IFS= read -r repo; do
+    [ -z "$repo" ] && continue
     progress "$repo ($downloaded downloaded, $skipped_no_wf skipped)"
 
     wf_list=$(gh api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || true)
@@ -262,17 +268,18 @@ else
     repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
     mkdir -p "$repo_dir"
 
-    for wf in $wf_list; do
+    while IFS= read -r wf; do
+      [ -z "$wf" ] && continue
       content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || true)
       if [ -n "$content" ]; then
         echo "$content" | "${BASE64_DECODE[@]}" >"$repo_dir/$wf" 2>/dev/null || true
         downloaded=$((downloaded + 1))
       fi
-    done
+    done <<<"$wf_list"
 
     REPOS+=("$repo")
     sleep 0.1
-  done
+  done <<<"$all_repos"
 
   printf "%-80s\n" " " # clear progress line
   info "Downloaded $downloaded workflow files from ${#REPOS[@]} repos ($skipped_no_wf repos had no workflows)"

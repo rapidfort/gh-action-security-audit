@@ -69,15 +69,14 @@ setup() {
   assert_success
 }
 
-@test "BUG: prt-head-ref: github.head_ref not detected as fork ref by current regex" {
-  # The script checks for 'pull_request.head.(sha|ref)' but not 'github.head_ref'.
-  # github.head_ref is the shorthand that many workflows use.
-  run grep -qE 'pull_request\.head\.(sha|ref)' "$FIXTURES_DIR/workflows/prt-head-ref.yml"
-  assert_failure
+@test "prt-head-ref: github.head_ref detected as fork ref" {
+  # Fixed: regex now matches github.head_ref shorthand.
+  run grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' "$FIXTURES_DIR/workflows/prt-head-ref.yml"
+  assert_success
 }
 
-@test "prt-head-repo-fullname: head.repo.full_name contains head.sha match" {
-  run grep -qE 'pull_request\.head\.(sha|ref)' "$FIXTURES_DIR/workflows/prt-head-repo-fullname.yml"
+@test "prt-head-repo-fullname: head.repo.full_name detected as fork ref" {
+  run grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' "$FIXTURES_DIR/workflows/prt-head-repo-fullname.yml"
   assert_success
 }
 

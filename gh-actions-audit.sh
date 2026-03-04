@@ -282,7 +282,7 @@ for repo in "${REPOS[@]}"; do
       is_dependabot=0
 
       grep -q 'actions/checkout' "$f" 2>/dev/null && has_checkout=1
-      grep -qE 'pull_request\.head\.(sha|ref)' "$f" 2>/dev/null && has_fork_ref=1
+      grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' "$f" 2>/dev/null && has_fork_ref=1
       grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" "$f" 2>/dev/null && is_dependabot=1
       grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" "$f" 2>/dev/null && has_author_guard=1
       grep -q 'author_association' "$f" 2>/dev/null && has_author_guard=1

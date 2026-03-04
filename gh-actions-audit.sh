@@ -286,33 +286,34 @@ fi
 
 info "Analyzing workflows..."
 
-# Temp files to accumulate table rows
-TABLE_ROWS=$(mktemp)
-TABLE_ROWS_CSV=$(mktemp)
+# --- analyze_repo: analyze a single repo's workflow files ---
+# Outputs two lines to stdout: markdown row, then csv row (pipe-delimited)
+# Globals: ORG, WORKFLOWS_DIR
+analyze_repo() {
+  local repo="$1"
+  local repo_dir="$2"
 
-for repo in "${REPOS[@]}"; do
-  repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
-  [ -d "$repo_dir" ] || continue
-
-  wf_files=()
+  local wf_files=()
   while IFS= read -r f; do
     wf_files+=("$f")
   done < <(find "$repo_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null)
 
-  [ ${#wf_files[@]} -eq 0 ] && continue
+  [ ${#wf_files[@]} -eq 0 ] && return 1
 
-  # --- Per-file analysis: read each file once ---
-  total_wf=${#wf_files[@]}
-  wf_with_perms=0
-  prt_wfs=()
-  prt_wfs_csv=()
-  ic_wfs=()
-  ic_wfs_csv=()
+  local total_wf=${#wf_files[@]}
+  local wf_with_perms=0
+  local prt_wfs=()
+  local prt_wfs_csv=()
+  local ic_wfs=()
+  local ic_wfs_csv=()
+
+  local f wf_name wf_content wf_uncommented
+  local has_checkout has_fork_ref has_author_guard is_dependabot
+  local dep_tag detail detail_csv
 
   for f in "${wf_files[@]}"; do
     wf_name=$(basename "$f")
     wf_content=$(cat "$f" 2>/dev/null) || continue
-    # Strip comment lines once for checks that need it
     wf_uncommented=$(echo "$wf_content" | grep -v '^\s*#')
 
     # --- Permissions ---
@@ -369,7 +370,8 @@ for repo in "${REPOS[@]}"; do
     fi
   done
 
-  # --- Permissions cell ---
+  # --- Build cells ---
+  local perms_cell perms_csv
   if [ "$wf_with_perms" -eq "$total_wf" ]; then
     perms_cell="All ($total_wf/$total_wf)"
     perms_csv="All ($total_wf/$total_wf)"
@@ -381,34 +383,36 @@ for repo in "${REPOS[@]}"; do
     perms_csv="Partial ($wf_with_perms/$total_wf)"
   fi
 
-  # --- PRT cell ---
+  local prt_cell prt_csv
   if [ ${#prt_wfs[@]} -eq 0 ]; then
     prt_cell="No"
     prt_csv="No"
   else
     prt_cell=$(printf '%s' "${prt_wfs[0]}")
     prt_csv=$(printf '%s' "${prt_wfs_csv[0]}")
+    local i
     for ((i = 1; i < ${#prt_wfs[@]}; i++)); do
       prt_cell+=$(printf '<br/>%s' "${prt_wfs[$i]}")
       prt_csv+=$(printf '; %s' "${prt_wfs_csv[$i]}")
     done
   fi
 
-  # --- IC cell ---
+  local ic_cell ic_csv
   if [ ${#ic_wfs[@]} -eq 0 ]; then
     ic_cell="No"
     ic_csv="No"
   else
     ic_cell=$(printf '%s' "${ic_wfs[0]}")
     ic_csv=$(printf '%s' "${ic_wfs_csv[0]}")
+    local i
     for ((i = 1; i < ${#ic_wfs[@]}; i++)); do
       ic_cell+=$(printf '<br/>%s' "${ic_wfs[$i]}")
       ic_csv+=$(printf '; %s' "${ic_wfs_csv[$i]}")
     done
   fi
 
-  # --- Repo secrets ---
-  secrets_cell=""
+  local secrets_cell=""
+  local secret_names
   secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
     warn "Could not fetch secrets for $repo (may lack repo admin access)."
     secret_names=""
@@ -419,9 +423,24 @@ for repo in "${REPOS[@]}"; do
     secrets_cell=$(echo "$secret_names" | paste -sd', ' -)
   fi
 
-  # --- Write rows ---
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}" >>"$TABLE_ROWS"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}" >>"$TABLE_ROWS_CSV"
+  # Output: markdown row, then csv row
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}"
+}
+
+# Temp files to accumulate table rows
+TABLE_ROWS=$(mktemp)
+TABLE_ROWS_CSV=$(mktemp)
+
+for repo in "${REPOS[@]}"; do
+  repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
+  [ -d "$repo_dir" ] || continue
+
+  result=$(analyze_repo "$repo" "$repo_dir") || continue
+
+  # First line is markdown, second is csv
+  echo "$result" | head -1 >>"$TABLE_ROWS"
+  echo "$result" | tail -1 >>"$TABLE_ROWS_CSV"
   progress "$repo"
 done
 

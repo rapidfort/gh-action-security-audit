@@ -47,6 +47,14 @@ setup() {
   assert_output --partial 'warn'
 }
 
+@test "analyze_repo function is defined and called in Phase 2" {
+  run grep -c 'analyze_repo()' "$SCRIPT"
+  assert_success
+  # Should appear at least once (the definition)
+  run grep 'analyze_repo ' "$SCRIPT"
+  assert_success
+}
+
 @test "workflow files are read once into a variable, not grepped repeatedly" {
   # Each workflow should be read into wf_content once, not grepped 10 times
   # Check that we use cat/read into variable, not direct grep on file for analysis

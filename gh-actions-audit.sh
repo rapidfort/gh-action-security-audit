@@ -279,7 +279,14 @@ else
   info "Enumerating non-archived repos with workflows..."
 
   # Get all non-archived repos
-  all_repos=$(gh repo list "$ORG" --limit 1000 --no-archived --json name --jq '.[].name' 2>/dev/null)
+  all_repos=$(gh repo list "$ORG" --limit 1000 --no-archived --json name --jq '.[].name' 2>/dev/null) || {
+    crit "Failed to list repos for '$ORG'. Check gh auth and org access."
+    exit 1
+  }
+  if [ -z "$all_repos" ]; then
+    crit "No repos found for '$ORG'. Verify the org name and your permissions."
+    exit 1
+  fi
   total_repos=$(grep -c . <<<"$all_repos" || echo 0)
 
   if [ "$total_repos" -ge 1000 ]; then
@@ -546,11 +553,14 @@ classify_unpinned() {
 }
 
 # --- analyze_repo: analyze a single repo's workflow files ---
-# Outputs two lines to stdout: markdown row, then csv row (pipe-delimited)
+# Writes pipe-delimited rows directly to md and csv temp files.
+# Args: repo repo_dir md_file csv_file
 # Globals: ORG, WORKFLOWS_DIR
 analyze_repo() {
   local repo="$1"
   local repo_dir="$2"
+  local md_file="$3"
+  local csv_file="$4"
 
   local wf_files=()
   while IFS= read -r f; do
@@ -700,9 +710,9 @@ analyze_repo() {
     secrets_cell=$(paste -sd', ' - <<<"$secret_names")
   fi
 
-  # Output: markdown row, then csv row
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${secrets_cell}"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${secrets_cell}"
+  # Write directly to output files — no fragile head/tail split
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${secrets_cell}" >>"$md_file"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${secrets_cell}" >>"$csv_file"
 }
 
 # Temp files to accumulate table rows
@@ -713,11 +723,7 @@ for repo in "${REPOS[@]}"; do
   repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
   [ -d "$repo_dir" ] || continue
 
-  result=$(analyze_repo "$repo" "$repo_dir") || continue
-
-  # First line is markdown, second is csv
-  echo "$result" | head -1 >>"$TABLE_ROWS_FILE"
-  echo "$result" | tail -1 >>"$TABLE_ROWS_CSV_FILE"
+  analyze_repo "$repo" "$repo_dir" "$TABLE_ROWS_FILE" "$TABLE_ROWS_CSV_FILE" || continue
   progress "$repo"
 done
 
@@ -809,14 +815,14 @@ info "Org secrets enumeration complete."
 
 info "Fetching org-level Actions settings..."
 
-default_wf_perm=$(gh api "orgs/$ORG/actions/permissions/workflow" --jq '.default_workflow_permissions // "unknown"' 2>/dev/null) || {
+# Fetch workflow permissions + PR approval in a single API call
+wf_perms_response=$(gh api "orgs/$ORG/actions/permissions/workflow" \
+  --jq '(.default_workflow_permissions // "unknown") + "|" + ((.can_approve_pull_request_reviews // "unknown") | tostring)' 2>/dev/null) || {
   warn "Could not fetch org workflow permissions (check admin:org scope)."
-  default_wf_perm="unknown"
+  wf_perms_response="unknown|unknown"
 }
-can_approve_prs=$(gh api "orgs/$ORG/actions/permissions/workflow" --jq '.can_approve_pull_request_reviews // "unknown"' 2>/dev/null) || {
-  warn "Could not fetch org PR approval setting (check admin:org scope)."
-  can_approve_prs="unknown"
-}
+default_wf_perm="${wf_perms_response%%|*}"
+can_approve_prs="${wf_perms_response#*|}"
 allowed_actions=$(gh api "orgs/$ORG/actions/permissions" --jq '.allowed_actions // "unknown"' 2>/dev/null) || {
   warn "Could not fetch org actions permissions (check admin:org scope)."
   allowed_actions="unknown"

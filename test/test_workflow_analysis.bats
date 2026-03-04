@@ -272,12 +272,23 @@ PREAMBLE
 _run_analyze_repo() {
   local repo="$1"
   local repo_dir="$2"
+  local md_file csv_file
+  md_file=$(mktemp)
+  csv_file=$(mktemp)
   bash -c "
     $(_script_preamble)
     ORG='test-org'
     WORKFLOWS_DIR='$BATS_TEST_WORKFLOW_DIR'
-    analyze_repo '$repo' '$repo_dir'
+    analyze_repo '$repo' '$repo_dir' '$md_file' '$csv_file'
   "
+  local rc=$?
+  # Output md row then csv row (same format tests expect)
+  if [ -s "$md_file" ]; then
+    cat "$md_file"
+    cat "$csv_file"
+  fi
+  rm -f "$md_file" "$csv_file"
+  return $rc
 }
 
 @test "analyze_repo: permissions-explicit workflow reports All permissions" {

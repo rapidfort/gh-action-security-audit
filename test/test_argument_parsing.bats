@@ -239,3 +239,27 @@ _run_require_arg() {
   assert_failure
   assert_output --partial "requires a filename"
 }
+
+# =============================================================================
+# Structural: robustness checks (ct5, i45, 1rx)
+# =============================================================================
+
+@test "gh repo list failure is handled with crit and exit" {
+  # ct5: repo list must not silently produce empty reports
+  run grep -A2 'gh repo list' "$SCRIPT"
+  assert_success
+  assert_output --partial "crit"
+}
+
+@test "Phase 4: permissions/workflow endpoint called only once" {
+  # i45: single API call, not two separate calls
+  local count
+  count=$(grep -c 'actions/permissions/workflow' "$SCRIPT")
+  [ "$count" -eq 1 ]
+}
+
+@test "analyze_repo writes directly to files (no head/tail split)" {
+  # 1rx: analyze_repo must not output to stdout for head/tail parsing
+  run grep -E 'head -1.*TABLE_ROWS|tail -1.*TABLE_ROWS' "$SCRIPT"
+  assert_failure
+}

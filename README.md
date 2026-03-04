@@ -33,30 +33,45 @@ This tool scans an org's workflows for these patterns and generates a report hig
 
 ### Per-Repository Checks
 
-| Check | Risk | What it detects | Sub-classifications | References |
-|-------|------|-----------------|---------------------|------------|
-| **Explicit `permissions:`** | Medium | Workflows missing `permissions:` blocks inherit org default (often `write`) | All, Partial, None (with ratio) | [GitHub docs: permissions](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs) |
-| **`pull_request_target`** | Critical | Pwn request attack surface — workflows that run with target repo secrets on fork PRs | API-only (low), checkout+guard (review), checkout+exec no guard (**critical**), checkout no fork ref (review), Dependabot-gated | [Pwn requests](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/) · [Ultralytics YOLO exploit](https://www.stepsecurity.io/blog/ultralytics-workflow-compromise) · [hackerbot-claw](https://www.stepsecurity.io/blog/hacking-millions-of-repos-with-github-actions) |
-| **`issue_comment`** | High | Workflows any GitHub user can trigger by commenting on public issues/PRs | has author_association, has actor check, **no author gate** | [GitHub docs: events](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#issue_comment) |
-| **Unpinned Actions** | High | Action references using mutable tags (`@v4`, `@main`) vulnerable to tag-override supply chain attacks | Pinned/total ratio per workflow | [tj-actions/changed-files compromise (CVE-2025-30066)](https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised) · [CISA guidance](https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-github-action-cve-2025-30066) |
-| **Expression Injection** | Critical | `${{ github.event.* }}` expressions in `run:` blocks allowing shell command injection via PR titles, branch names, issue bodies, comments. Also detects `${{ inputs.* }}` (workflow_dispatch) and `${{ github.event.client_payload.* }}` (repository_dispatch) | Lists specific dangerous contexts found | [GitHub docs: security hardening](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections) · [Nx exploit](https://cycode.com/blog/github-actions-vulnerabilities/) |
-| **`workflow_run`** | High | Workflows triggered by `workflow_run` bypass fork PR restrictions and run with write permissions | download-artifact (**high** — artifact poisoning), checkout (medium), API-only (low) | [GitHub docs: workflow_run](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_run) · [Ultralytics YOLO artifact attack](https://www.stepsecurity.io/blog/ultralytics-workflow-compromise) |
-| **Self-Hosted Runners** | High | Workflows using `runs-on: self-hosted` — persistent machines vulnerable to credential theft and lateral movement | Flags self-hosted per workflow | [GitHub docs: self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security) |
-| **Dangerous Permissions** | Medium | Workflows with `permissions:` granting excessive access (`write-all`, `contents: write`, etc.) | Lists specific dangerous grants found | [GitHub docs: permissions](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs) |
-| **Hardcoded Secrets** | Critical | Hardcoded tokens/keys in workflow files (`ghp_*`, `gho_*`, `AKIA*`) that should use GitHub Secrets | Lists detected token types per workflow | [SpotBugs PAT theft](https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised) |
-| **Harden-Runner** | Info | Whether the repo uses [step-security/harden-runner](https://github.com/step-security/harden-runner) for runtime monitoring | Yes/No per repo | [harden-runner detected tj-actions compromise](https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised) |
-| **Repo Secrets** | Info | Secret names configured on the repo (accessible from any workflow, including exploited ones) | Comma-separated list | [GitHub docs: encrypted secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) |
+| ID | Check | Risk | What it detects |
+|----|-------|------|-----------------|
+| GHA-001 | **Explicit `permissions:`** | Medium | Workflows missing `permissions:` blocks inherit org default (often `write`) |
+| GHA-002 | **`pull_request_target`** | Critical | Pwn request attack surface — checkout+exec of fork code with target repo secrets |
+| GHA-003 | **`issue_comment` gating** | High | Workflows any GitHub user can trigger by commenting on public issues/PRs |
+| GHA-004 | **Unpinned Actions** | High | Action references using mutable tags (`@v4`, `@main`) vulnerable to tag-override attacks |
+| GHA-005 | **Expression Injection** | Critical | `${{ github.event.* }}` in `run:` blocks — shell injection via PR titles, branch names, etc. |
+| GHA-006 | **`workflow_run` artifacts** | High | `workflow_run` workflows that download and execute artifacts (poisoning risk) |
+| GHA-007 | **Self-Hosted Runners** | High | `runs-on: self-hosted` — persistent machines vulnerable to credential theft |
+| GHA-008 | **Dangerous Permissions** | Medium | `permissions: write-all`, `contents: write`, and other excessive grants |
+| GHA-009 | **Hardcoded Secrets** | Critical | Hardcoded tokens/keys in workflow files (`ghp_*`, `gho_*`, `AKIA*`) |
+| GHA-010 | **Harden-Runner** | Info | Whether the repo uses [step-security/harden-runner](https://github.com/step-security/harden-runner) |
+| GHA-014 | **`secrets: inherit`** | High | Reusable workflow calls using `secrets: inherit` — passes all secrets |
+| GHA-015 | **Env injection** | Critical | Untrusted data written to `GITHUB_ENV`, `GITHUB_PATH`, or `GITHUB_OUTPUT` |
+| GHA-016 | **Extended expression contexts** | Critical | Additional dangerous contexts: `discussion.title`, `head_commit.message`, `pages.*.page_name` |
+| GHA-017 | **Deprecated commands** | High | `::set-output`, `::set-env`, `::add-path` — deprecated injection vectors |
+| GHA-018 | **Known-compromised actions** | Critical | `tj-actions/changed-files`, `reviewdog/action-setup`, and other compromised actions |
+| GHA-019 | **`github.event.ref` injection** | High | `github.event.ref` in `run:` blocks — attacker-controlled branch/tag names |
+| GHA-020 | **Third-party unpinned** | Medium | Distinguishes first-party (`actions/*`) from third-party unpinned actions |
+| GHA-021 | **PRT untrusted ref checkout** | Critical | `pull_request_target` checkout of `head.sha`, `head.ref`, or PR merge ref |
+| GHA-022 | **`always()` + secrets** | High | `if: always()` or `continue-on-error` combined with secret access |
+| GHA-023 | **Artifact trust** | High | `actions/download-artifact` usage without integrity validation |
+| GHA-024 | **Missing environment** | Medium | Deployment workflows (`docker push`, `terraform apply`) without `environment:` protection |
+| GHA-025 | **Cache poisoning** | High | `actions/cache` in fork-triggered workflows — shared cache poisoning risk |
+| GHA-026 | **Static credentials** | Medium | Static cloud credentials (`AWS_ACCESS_KEY_ID`, etc.) instead of OIDC federation |
+| — | **Repo Secrets** | Info | Secret names configured on the repo (informational listing) |
 
 ### Org-Level Checks
 
-| Check | Risk | What it detects | References |
-|-------|------|-----------------|------------|
-| **Default workflow permissions** | High | Org default `write` gives all workflows read/write `GITHUB_TOKEN` | [GitHub docs: default permissions](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization#setting-the-permissions-of-the-github_token-for-your-organization) |
-| **PR approval by workflows** | Medium | Whether workflows can approve pull requests (self-approval risk) | [GitHub docs: workflow permissions](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization) |
-| **Allowed actions policy** | Medium | Whether all actions are allowed or restricted to verified/selected | [GitHub docs: allowed actions](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization#allowing-select-actions-and-reusable-workflows-to-run) |
-| **Org secret visibility** | High | Secrets with `All repositories` scope are accessible from any repo | [GitHub docs: org secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-an-organization) |
-| **Secret usage mapping** | Info | Maps each org secret to repos that actually reference it, flags unused broad access | — |
-| **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets | — |
+| ID | Check | Risk | What it detects |
+|----|-------|------|-----------------|
+| GHA-011 | **Default workflow permissions** | High | Org default `write` gives all workflows read/write `GITHUB_TOKEN` |
+| GHA-012 | **PR approval by workflows** | Medium | Whether workflows can approve pull requests (self-approval risk) |
+| GHA-013 | **Allowed actions policy** | Medium | Whether all actions are allowed or restricted to verified/selected |
+| GHA-027 | **SHA pinning enforcement** | Medium | Whether the org enforces SHA pinning for all action references |
+| GHA-028 | **Actions repository policy** | Medium | Whether Actions is restricted to selected repositories or allowed for all |
+| GHA-029 | **Org secret scoping** | Medium | Secrets with `All repositories` scope accessible from any repo |
+| — | **Secret usage mapping** | Info | Maps each org secret to repos that reference it, flags unused broad access |
+| — | **Remediation commands** | — | Generates `gh secret set` commands to restrict overly broad secrets |
 
 ### Key Incidents Driving These Checks
 

@@ -6,7 +6,7 @@
 # CCI source: DISA Control Correlation Identifiers, mapped to NIST 800-53 rev 4/5
 
 # ============================================================================
-# Per-Repository Checks (currently implemented)
+# Per-Repository Checks (GHA-001 through GHA-010)
 # ============================================================================
 
 - id: GHA-001
@@ -279,7 +279,7 @@
   implemented: true
 
 # ============================================================================
-# Org-Level Checks (currently implemented)
+# Org-Level Checks (GHA-011 through GHA-013)
 # ============================================================================
 
 - id: GHA-011
@@ -356,7 +356,7 @@
   implemented: true
 
 # ============================================================================
-# Planned Detection Checks (not yet implemented)
+# Additional Per-Repository Checks (GHA-014 through GHA-026)
 # ============================================================================
 
 - id: GHA-014
@@ -712,6 +712,10 @@
   classifier: classify_static_credentials
   implemented: true
   card: wzi
+
+# ============================================================================
+# Additional Org-Level Checks (GHA-027 through GHA-029)
+# ============================================================================
 
 - id: GHA-027
   title: "Organization SHOULD enforce SHA pinning for actions"

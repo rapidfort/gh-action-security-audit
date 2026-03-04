@@ -22,12 +22,10 @@ setup() {
   assert_output "0"
 }
 
-@test "BUG: permissions-in-comment is a false positive with current grep" {
-  # Current script uses 'grep -q permissions:' which matches inside comments.
-  # This test documents the bug — it should PASS (proving the bug exists).
-  # When we fix the bug, this test inverts to assert_failure.
-  run grep -q 'permissions:' "$FIXTURES_DIR/workflows/permissions-in-comment.yml"
-  assert_success
+@test "permissions-in-comment: NOT a false positive — comment-only permissions: is ignored" {
+  # Fixed: strips comment lines before checking for permissions:.
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/permissions-in-comment.yml' | grep -q 'permissions:'"
+  assert_failure
 }
 
 # =============================================================================
@@ -100,11 +98,10 @@ setup() {
   refute_output --partial 'author_association'
 }
 
-@test "BUG: issue-comment-author-in-comment: false positive — author_association appears only in comment" {
-  # Current script uses 'grep -q author_association' which matches comments.
-  # This documents the bug.
-  run grep -q 'author_association' "$FIXTURES_DIR/workflows/issue-comment-author-in-comment.yml"
-  assert_success
+@test "issue-comment-author-in-comment: NOT a false positive — comment-only author_association is ignored" {
+  # Fixed: strips comment lines before checking for author_association.
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/issue-comment-author-in-comment.yml' | grep -q 'author_association'"
+  assert_failure
 }
 
 # =============================================================================
@@ -116,10 +113,14 @@ setup() {
   assert_success
 }
 
-@test "BUG: secrets.FOO grep also matches secrets.FOOBAR (partial match)" {
-  # Current script: grep -rl "secrets.$secret_name" which matches substrings.
-  # This test documents the bug.
-  run grep -q 'secrets\.FOO' "$FIXTURES_DIR/workflows/secret-reference-foobar.yml"
+@test "secrets.FOO grep does NOT match secrets.FOOBAR (no partial match)" {
+  # Fixed: uses word boundary to prevent substring matching.
+  run grep -qE 'secrets\.FOO([^a-zA-Z0-9_]|$)' "$FIXTURES_DIR/workflows/secret-reference-foobar.yml"
+  assert_failure
+}
+
+@test "script uses word-boundary grep for secret matching" {
+  run grep 'grep.*-rlE.*secret_name.*a-zA-Z0-9_' "$SCRIPT"
   assert_success
 }
 

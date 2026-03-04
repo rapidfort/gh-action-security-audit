@@ -303,7 +303,7 @@ for repo in "${REPOS[@]}"; do
   total_wf=${#wf_files[@]}
   wf_with_perms=0
   for f in "${wf_files[@]}"; do
-    if grep -q 'permissions:' "$f" 2>/dev/null; then
+    if grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'permissions:'; then
       wf_with_perms=$((wf_with_perms + 1))
     fi
   done
@@ -337,7 +337,7 @@ for repo in "${REPOS[@]}"; do
       grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' "$f" 2>/dev/null && has_fork_ref=1
       grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" "$f" 2>/dev/null && is_dependabot=1
       grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" "$f" 2>/dev/null && has_author_guard=1
-      grep -q 'author_association' "$f" 2>/dev/null && has_author_guard=1
+      grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'author_association' && has_author_guard=1
 
       # Tag Dependabot-gated workflows so reviewers can skip false positives
       dep_tag=""
@@ -382,7 +382,7 @@ for repo in "${REPOS[@]}"; do
   for f in "${wf_files[@]}"; do
     if grep -q 'issue_comment' "$f" 2>/dev/null; then
       wf_name=$(basename "$f")
-      if grep -q 'author_association' "$f" 2>/dev/null; then
+      if grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'author_association'; then
         ic_wfs+=("$wf_name (has author_association)")
         ic_wfs_csv+=("$wf_name (has author_association)")
       elif grep -qE "user\.login\s*==|actor\s*==" "$f" 2>/dev/null; then
@@ -470,7 +470,8 @@ if [ -n "$org_secrets" ]; then
     esac
 
     # Grep all downloaded workflows for references to this secret
-    referenced_repos=$(grep -rl "secrets\.$secret_name" "$WORKFLOWS_DIR" 2>/dev/null \
+    # Use word boundary to prevent partial matching (e.g., FOO matching FOOBAR)
+    referenced_repos=$(grep -rlE "secrets\.$secret_name([^a-zA-Z0-9_]|$)" "$WORKFLOWS_DIR" 2>/dev/null \
       | sed "s|$WORKFLOWS_DIR/$ORG/||" \
       | cut -d/ -f1 \
       | sort -u \

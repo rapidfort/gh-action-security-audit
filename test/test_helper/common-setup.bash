@@ -93,6 +93,8 @@ GHEOF
 
 # Register a canned response for specific gh arguments.
 # Args: <args-as-single-string> <response-body>
+# Simple cases only — splits on spaces. For args with spaces (e.g. --jq
+# expressions), use mock_gh_response_args instead.
 # Example: mock_gh_response "api user --jq .login" "test-user"
 mock_gh_response() {
   local args_str="$1"
@@ -100,6 +102,31 @@ mock_gh_response() {
   # Hash the args the same way the mock does — one arg per line
   local key
   key=$(echo "$args_str" | tr ' ' '\n' | md5sum 2>/dev/null | cut -d' ' -f1 || echo "$args_str" | tr ' ' '\n' | md5 2>/dev/null | cut -d' ' -f1)
+  echo "$response" > "${MOCK_GH_DIR}/responses/${key}"
+}
+
+# Register a canned response with exact argument matching.
+# Last argument is the response body; all preceding arguments are the gh args.
+# The hash matches exactly how the mock gh script hashes $@ (one arg per line).
+# Example: mock_gh_response_args api "orgs/foo/actions/permissions" --jq '.allowed_actions' -- "selected"
+# The -- separator separates gh args from the response body.
+mock_gh_response_args() {
+  local args=()
+  local response=""
+  local found_sep=0
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+      found_sep=1
+      continue
+    fi
+    if [ "$found_sep" -eq 1 ]; then
+      response="$arg"
+    else
+      args+=("$arg")
+    fi
+  done
+  local key
+  key=$(printf '%s\n' "${args[@]}" | md5sum 2>/dev/null | cut -d' ' -f1 || printf '%s\n' "${args[@]}" | md5 2>/dev/null | cut -d' ' -f1)
   echo "$response" > "${MOCK_GH_DIR}/responses/${key}"
 }
 

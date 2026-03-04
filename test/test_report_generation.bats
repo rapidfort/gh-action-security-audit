@@ -17,14 +17,22 @@ setup() {
   cp "$FIXTURES_DIR/workflows/prt-checkout-no-guard.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/repo-with-prt/"
   cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/repo-clean/"
 
-  # Mock org-level API calls
-  mock_gh_response "api orgs/test-org/actions/secrets --paginate --jq .secrets[] | \"\(.name)|\(.visibility)\"" ""
-  mock_gh_response "api orgs/test-org/actions/permissions/workflow" '{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}'
-  mock_gh_response "api orgs/test-org/actions/permissions" '{"allowed_actions":"selected"}'
+  # Mock org-level API calls — use mock_gh_response_args for --jq calls
+  # so args with spaces are hashed correctly (one per $@ element).
+  # Org secrets
+  mock_gh_response_args api "orgs/test-org/actions/secrets" --paginate \
+    --jq '.secrets[] | "\(.name)|\(.visibility)"' -- ""
+  # Workflow permissions (--jq produces pipe-delimited string)
+  mock_gh_response_args api "orgs/test-org/actions/permissions/workflow" \
+    --jq '(.default_workflow_permissions // "unknown") + "|" + ((.can_approve_pull_request_reviews // "unknown") | tostring)' \
+    -- 'read|false'
+  # Allowed actions
+  mock_gh_response_args api "orgs/test-org/actions/permissions" \
+    --jq '.allowed_actions // "unknown"' -- "selected"
 
   # Repo secrets — return empty for each
-  mock_gh_response "api repos/test-org/repo-with-prt/actions/secrets --jq .secrets[].name" ""
-  mock_gh_response "api repos/test-org/repo-clean/actions/secrets --jq .secrets[].name" ""
+  mock_gh_response_args api "repos/test-org/repo-with-prt/actions/secrets" --jq '.secrets[].name' -- ""
+  mock_gh_response_args api "repos/test-org/repo-clean/actions/secrets" --jq '.secrets[].name' -- ""
 
   REPORT_FILE="$(mktemp)"
 }
@@ -59,4 +67,31 @@ teardown() {
   assert_success
   run cat "$REPORT_FILE"
   assert_output --partial "Review Guidance"
+}
+
+# --- Phase 4: org settings in report (5mv) ---
+
+@test "report shows default workflow permissions from API" {
+  run bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE"
+  assert_success
+  run cat "$REPORT_FILE"
+  # Org settings table should show "read", not "unknown"
+  assert_output --partial "| Default workflow permissions | \`read\`"
+  refute_output --partial "unknown"
+}
+
+@test "report shows allowed actions policy from API" {
+  run bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE"
+  assert_success
+  run cat "$REPORT_FILE"
+  # "selected" maps to "Selected" in report
+  assert_output --partial "| Allowed actions | Selected |"
+}
+
+@test "report shows PR approval policy from API" {
+  run bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE"
+  assert_success
+  run cat "$REPORT_FILE"
+  # "false" maps to "No" in report
+  assert_output --partial "| Workflows can approve PRs | No |"
 }

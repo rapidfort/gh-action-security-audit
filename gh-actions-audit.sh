@@ -402,6 +402,84 @@ classify_ic() {
   echo "${detail}|${detail_csv}"
 }
 
+# --- classify_expr_injection: detect dangerous expressions in run: blocks ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty string if no dangerous expressions found)
+# Dangerous: ${{ github.event.issue.title }}, ${{ github.head_ref }}, etc.
+# Safe: same expressions in env: blocks (assigned to env vars before run:)
+classify_expr_injection() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+
+  # Extract content of run: blocks (inline and multiline |)
+  # Uses awk: when we see "run:" capture that line and subsequent indented lines
+  local run_content
+  run_content=$(awk '
+    /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*\|/ { in_run=1; run_indent=0; match($0, /^[[:space:]]*/); run_indent=RLENGTH; next }
+    /^[[:space:]]*-?[[:space:]]*run:/ { print; next }
+    in_run {
+      if (NF == 0) { next }
+      match($0, /^[[:space:]]*/);
+      if (RLENGTH <= run_indent) { in_run=0; next }
+      print
+    }
+  ' <<<"$wf_uncommented")
+
+  [ -z "$run_content" ] && return 0
+
+  # Pattern for dangerous user-controlled expressions
+  local dangerous_pattern='github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[)|github\.head_ref'
+
+  # Find dangerous expressions in run: block content
+  local found
+  found=$(grep -oE '\$\{\{[^}]*('"${dangerous_pattern}"')[^}]*\}\}' <<<"$run_content" 2>/dev/null \
+    | grep -oE "${dangerous_pattern}" \
+    | sort -u || true)
+
+  [ -z "$found" ] && return 0
+
+  # Format as comma-separated list of dangerous contexts
+  local contexts
+  contexts=$(paste -sd', ' - <<<"$found")
+
+  local detail="" detail_csv=""
+  detail="$wf_name (**${contexts}**)"
+  detail_csv="$wf_name (${contexts})"
+
+  echo "${detail}|${detail_csv}"
+}
+
+# --- classify_unpinned: report pinned vs unpinned action refs in a workflow ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty string if no uses: lines)
+classify_unpinned() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+
+  # Extract all uses: lines (excluding commented ones via wf_uncommented)
+  local uses_lines
+  uses_lines=$(grep -E 'uses:.*@' <<<"$wf_uncommented" || true)
+  [ -z "$uses_lines" ] && return 0
+
+  local total=0 pinned=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    total=$((total + 1))
+    if echo "$line" | grep -qE '@[0-9a-f]{40}'; then
+      pinned=$((pinned + 1))
+    fi
+  done <<<"$uses_lines"
+
+  local detail="" detail_csv=""
+  if [ "$pinned" -eq "$total" ]; then
+    detail="$wf_name ($pinned/$total pinned)"
+    detail_csv="$wf_name ($pinned/$total pinned)"
+  else
+    detail="$wf_name (**$pinned/$total pinned**)"
+    detail_csv="$wf_name ($pinned/$total pinned)"
+  fi
+
+  echo "${detail}|${detail_csv}"
+}
+
 # --- analyze_repo: analyze a single repo's workflow files ---
 # Outputs two lines to stdout: markdown row, then csv row (pipe-delimited)
 # Globals: ORG, WORKFLOWS_DIR
@@ -422,6 +500,10 @@ analyze_repo() {
   local prt_wfs_csv=()
   local ic_wfs=()
   local ic_wfs_csv=()
+  local unpin_wfs=()
+  local unpin_wfs_csv=()
+  local expr_wfs=()
+  local expr_wfs_csv=()
 
   local f wf_name wf_content wf_uncommented
 
@@ -450,6 +532,22 @@ analyze_repo() {
       ic_wfs+=("${ic_result%%|*}")
       ic_wfs_csv+=("${ic_result#*|}")
     fi
+
+    # --- Unpinned actions ---
+    local unpin_result
+    unpin_result=$(classify_unpinned "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$unpin_result" ]; then
+      unpin_wfs+=("${unpin_result%%|*}")
+      unpin_wfs_csv+=("${unpin_result#*|}")
+    fi
+
+    # --- Expression injection ---
+    local expr_result
+    expr_result=$(classify_expr_injection "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$expr_result" ]; then
+      expr_wfs+=("${expr_result%%|*}")
+      expr_wfs_csv+=("${expr_result#*|}")
+    fi
   done
 
   # --- Build cells ---
@@ -473,6 +571,14 @@ analyze_repo() {
   ic_cell=$(join_array_cells '<br/>' "${ic_wfs[@]+"${ic_wfs[@]}"}")
   ic_csv=$(join_array_cells '; ' "${ic_wfs_csv[@]+"${ic_wfs_csv[@]}"}")
 
+  local unpin_cell unpin_csv
+  unpin_cell=$(join_array_cells '<br/>' "${unpin_wfs[@]+"${unpin_wfs[@]}"}")
+  unpin_csv=$(join_array_cells '; ' "${unpin_wfs_csv[@]+"${unpin_wfs_csv[@]}"}")
+
+  local expr_cell expr_csv
+  expr_cell=$(join_array_cells '<br/>' "${expr_wfs[@]+"${expr_wfs[@]}"}")
+  expr_csv=$(join_array_cells '; ' "${expr_wfs_csv[@]+"${expr_wfs_csv[@]}"}")
+
   local secrets_cell=""
   local secret_names
   secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
@@ -486,8 +592,8 @@ analyze_repo() {
   fi
 
   # Output: markdown row, then csv row
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${secrets_cell}"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${secrets_cell}"
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${secrets_cell}"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${secrets_cell}"
 }
 
 # Temp files to accumulate table rows
@@ -672,16 +778,22 @@ Columns:
   - Workflows gated to run only for `dependabot[bot]` are tagged **(Dependabot)**.
 - **`issue_comment`**: Whether any workflow triggers on issue/PR comments. Notes whether an
   `author_association` or actor check is present. Without one, any GitHub user can trigger the workflow.
+- **Unpinned Actions**: Action references using mutable tags (`@v4`, `@main`) instead of immutable SHA
+  pins (`@692973e3...`). Unpinned actions are vulnerable to tag-override attacks (e.g. tj-actions/changed-files
+  compromise, CVE-2025-30066). Shows pinned/total ratio per workflow file.
+- **Expression Injection**: Dangerous `${{ }}` expressions used directly in `run:` blocks. User-controlled
+  values like `github.event.pull_request.title` or `github.head_ref` can inject arbitrary shell commands
+  when interpolated into `run:` scripts. The safe alternative is to assign to an `env:` variable first.
 - **Repo Secrets**: Secret names configured directly on the repo (not values). These are accessible
   to any workflow that runs in the repo, including exploited `pull_request_target` workflows.
 
 PERREPO
 
-  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |"
-  echo "|------------|-------------|----------------------|-----------------|--------------|"
+  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expression Injection | Repo Secrets |"
+  echo "|------------|-------------|----------------------|-----------------|-----------------|---------------------|--------------|"
 
-  while IFS='|' read -r repo perms prt ic secrets; do
-    echo "| \`$repo\` | $perms | $prt | $ic | $secrets |"
+  while IFS='|' read -r repo perms prt ic unpin expr secrets; do
+    echo "| \`$repo\` | $perms | $prt | $ic | $unpin | $expr | $secrets |"
   done < <(sort "$TABLE_ROWS_FILE")
 
   # --- Org secrets section ---
@@ -741,7 +853,17 @@ ORGSECRETS
 3. **Repos with no explicit `permissions:` blocks**: These inherit the org default. If the
    org default is `write`, every workflow in these repos runs with a read/write `GITHUB_TOKEN`.
 
-4. **Org secrets with "All repositories" visibility**: These are accessible from any workflow
+4. **Expression injection in `run:` blocks**: Dangerous `${{ }}` expressions like
+   `github.event.pull_request.title` or `github.head_ref` used directly in `run:` blocks allow
+   arbitrary command injection. Attackers control these values via PR titles, branch names, issue
+   bodies, and comments. Use `env:` variables instead: `env: TITLE: ${{ github.event.pull_request.title }}`
+   then reference `$TITLE` in the `run:` block.
+
+5. **Unpinned actions**: Actions referenced by mutable tag (`@v4`, `@main`) instead of immutable
+   SHA (`@692973e3...`) are vulnerable to tag-override supply chain attacks (CVE-2025-30066,
+   tj-actions/changed-files compromise affected 23K+ repos). Pin all third-party actions to full SHAs.
+
+6. **Org secrets with "All repositories" visibility**: These are accessible from any workflow
    in any repo — including repos with exploitable workflow configurations.
 
 ### What the fork approval setting does and does not protect
@@ -758,6 +880,7 @@ events from forks. It provides **no protection** for:
 - **`author_association` checks**: `if: github.event.comment.author_association == 'MEMBER'`
 - **Environment protections**: Secrets in environments with required reviewers and branch restrictions
 - **Explicit `permissions:` blocks**: Limits `GITHUB_TOKEN` blast radius even if RCE is achieved
+- **SHA-pinned actions**: `uses: actions/checkout@692973e3...` is immutable; `@v4` can be moved
 - **No checkout**: Workflows that only make API calls (approve, label, merge) without checking
   out fork code are not vulnerable to code injection
 GUIDANCE
@@ -781,13 +904,15 @@ if [ -n "$CSV_FILE" ]; then
   }
 
   {
-    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Repo Secrets"
-    while IFS='|' read -r repo perms prt ic secrets; do
-      printf '%s,%s,%s,%s,%s\n' \
+    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,Repo Secrets"
+    while IFS='|' read -r repo perms prt ic unpin expr secrets; do
+      printf '%s,%s,%s,%s,%s,%s,%s\n' \
         "$(csv_field "$repo")" \
         "$(csv_field "$perms")" \
         "$(csv_field "$prt")" \
         "$(csv_field "$ic")" \
+        "$(csv_field "$unpin")" \
+        "$(csv_field "$expr")" \
         "$(csv_field "$secrets")"
     done < <(sort "$TABLE_ROWS_CSV_FILE")
 

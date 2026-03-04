@@ -257,10 +257,12 @@ _script_preamble() {
     gh() { echo ''; return 0; }
     export -f gh
 PREAMBLE
-  # Extract join_array_cells, classify_prt, classify_ic, and analyze_repo
+  # Extract helper and classify functions plus analyze_repo
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_unpinned()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_expr_injection()/,/^}/p' "$SCRIPT"
   sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
 }
 
@@ -362,6 +364,254 @@ _run_analyze_repo() {
 
   run _run_analyze_repo "empty-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/empty-repo"
   assert_failure
+}
+
+# =============================================================================
+# Unpinned action detection (e2w)
+# =============================================================================
+
+@test "unpinned-actions: detects uses: lines with tag refs (not SHA)" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/unpinned-actions.yml' | grep -E 'uses:.*@' | grep -vE '@[0-9a-f]{40}'"
+  assert_success
+  assert_output --partial "@v4"
+}
+
+@test "pinned-actions: all uses: lines have SHA refs" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/pinned-actions.yml' | grep -E 'uses:.*@' | grep -vE '@[0-9a-f]{40}'"
+  assert_failure
+}
+
+@test "mixed-pinning: detects unpinned subset" {
+  local unpinned
+  unpinned=$(grep -v '^\s*#' "$FIXTURES_DIR/workflows/mixed-pinning.yml" | grep -E 'uses:.*@' | grep -vE '@[0-9a-f]{40}' | wc -l | tr -d ' ')
+  [ "$unpinned" -eq 2 ]
+  local total
+  total=$(grep -v '^\s*#' "$FIXTURES_DIR/workflows/mixed-pinning.yml" | grep -cE 'uses:.*@' | tr -d ' ')
+  [ "$total" -eq 4 ]
+}
+
+@test "unpinned-actions-commented: commented-out unpinned action is NOT counted" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/unpinned-actions-commented.yml' | grep -E 'uses:.*@' | grep -vE '@[0-9a-f]{40}'"
+  assert_failure
+}
+
+# --- classify_unpinned() unit tests ---
+
+_run_classify_unpinned() {
+  local fixture="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo 'classify_unpinned "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_unpinned: all unpinned reports 0/N pinned" {
+  run _run_classify_unpinned "$FIXTURES_DIR/workflows/unpinned-actions.yml"
+  assert_success
+  assert_output --partial "0/3 pinned"
+}
+
+@test "classify_unpinned: all pinned reports N/N pinned" {
+  run _run_classify_unpinned "$FIXTURES_DIR/workflows/pinned-actions.yml"
+  assert_success
+  assert_output --partial "3/3 pinned"
+}
+
+@test "classify_unpinned: mixed reports correct ratio" {
+  run _run_classify_unpinned "$FIXTURES_DIR/workflows/mixed-pinning.yml"
+  assert_success
+  assert_output --partial "2/4 pinned"
+}
+
+@test "classify_unpinned: commented-out action not counted" {
+  run _run_classify_unpinned "$FIXTURES_DIR/workflows/unpinned-actions-commented.yml"
+  assert_success
+  assert_output --partial "1/1 pinned"
+}
+
+@test "classify_unpinned: no uses: lines returns empty" {
+  # issue-comment-no-gate.yml has no uses: lines (only run: steps)
+  run _run_classify_unpinned "$FIXTURES_DIR/workflows/issue-comment-no-gate.yml"
+  assert_success
+  assert_output ""
+}
+
+# --- analyze_repo integration tests for unpinned actions ---
+
+@test "analyze_repo: unpinned-actions reports 0/3 pinned in unpinned column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/unpinned-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "0/3 pinned"
+}
+
+@test "analyze_repo: pinned-actions reports 3/3 pinned in unpinned column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/pinned-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "3/3 pinned"
+}
+
+@test "analyze_repo: mixed-pinning reports 2/4 pinned" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/mixed-pinning.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "2/4 pinned"
+}
+
+@test "analyze_repo: benign workflow reports unpinned action" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # benign-workflow.yml has uses: actions/checkout@v4 (unpinned)
+  assert_line --index 0 --partial "0/1 pinned"
+}
+
+@test "analyze_repo: workflow with no uses: lines has No in unpinned column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/issue-comment-no-gate.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # issue-comment-no-gate.yml has no uses: lines → unpinned column = No
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  # Fields: repo(1)|perms(2)|prt(3)|ic(4)|unpin(5)|secrets(6)
+  local unpinned_col
+  unpinned_col=$(echo "$md_row" | cut -d'|' -f5)
+  [ "$unpinned_col" = "No" ]
+}
+
+# =============================================================================
+# Expression injection detection (exh)
+# =============================================================================
+
+# Dangerous expression patterns that can be injected via user-controlled input
+# when used inside run: blocks (not in env: blocks which are safe)
+
+# Helper: check for dangerous expressions in uncommented lines of a fixture
+_grep_dangerous_expr() {
+  local file="$1"
+  grep -v '^\s*#' "$file" \
+    | grep -E '\$\{\{.*(github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[)|github\.head_ref)'
+}
+
+@test "expr-injection-pr-title: detects dangerous expression in run: block" {
+  run _grep_dangerous_expr "$FIXTURES_DIR/workflows/expr-injection-pr-title.yml"
+  assert_success
+}
+
+@test "expr-injection-head-ref: detects github.head_ref in run: block" {
+  run _grep_dangerous_expr "$FIXTURES_DIR/workflows/expr-injection-head-ref.yml"
+  assert_success
+}
+
+@test "expr-injection-safe: safe expressions NOT flagged" {
+  run _grep_dangerous_expr "$FIXTURES_DIR/workflows/expr-injection-safe.yml"
+  assert_failure
+}
+
+@test "expr-injection-in-comment: commented-out expression NOT flagged" {
+  run _grep_dangerous_expr "$FIXTURES_DIR/workflows/expr-injection-in-comment.yml"
+  assert_failure
+}
+
+# --- classify_expr_injection() unit tests ---
+
+_run_classify_expr_injection() {
+  local fixture="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo 'classify_expr_injection "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_expr_injection: PR title injection detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-pr-title.yml"
+  assert_success
+  assert_output --partial "pull_request.title"
+}
+
+@test "classify_expr_injection: head_ref injection detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-head-ref.yml"
+  assert_success
+  assert_output --partial "head_ref"
+}
+
+@test "classify_expr_injection: comment.body injection detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-comment-body.yml"
+  assert_success
+  assert_output --partial "comment.body"
+}
+
+@test "classify_expr_injection: multiple injections detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-multiple.yml"
+  assert_success
+  assert_output --partial "pull_request.title"
+  assert_output --partial "head_ref"
+}
+
+@test "classify_expr_injection: safe expressions return empty" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-safe.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_expr_injection: commented-out injection returns empty" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_expr_injection: env-block usage returns empty (safe pattern)" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/expr-injection-in-env.yml"
+  assert_success
+  assert_output ""
+}
+
+# --- analyze_repo integration tests for expression injection ---
+
+@test "analyze_repo: expr-injection-pr-title reports expression injection" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/expr-injection-pr-title.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "pull_request.title"
+}
+
+@test "analyze_repo: expr-injection-safe has No in injection column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/expr-injection-safe.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # Expr injection column (7th field) should be No
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  local expr_col
+  expr_col=$(echo "$md_row" | cut -d'|' -f6)
+  [ "$expr_col" = "No" ]
 }
 
 # =============================================================================

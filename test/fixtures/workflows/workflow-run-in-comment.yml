@@ -1,0 +1,9 @@
+name: Build
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # This workflow could be triggered by workflow_run but isn't
+      - run: echo "building"

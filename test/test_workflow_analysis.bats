@@ -263,6 +263,9 @@ PREAMBLE
   sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_unpinned()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_expr_injection()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_wfr()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
 }
 
@@ -612,6 +615,202 @@ _run_classify_expr_injection() {
   local expr_col
   expr_col=$(echo "$md_row" | cut -d'|' -f6)
   [ "$expr_col" = "No" ]
+}
+
+# =============================================================================
+# workflow_run trigger detection (8yr)
+# =============================================================================
+
+_run_classify_wfr() {
+  local fixture="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo 'classify_wfr "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_wfr: artifact download detected as high risk" {
+  run _run_classify_wfr "$FIXTURES_DIR/workflows/workflow-run-artifact.yml"
+  assert_success
+  assert_output --partial "download-artifact"
+}
+
+@test "classify_wfr: checkout detected as medium risk" {
+  run _run_classify_wfr "$FIXTURES_DIR/workflows/workflow-run-checkout.yml"
+  assert_success
+  assert_output --partial "checkout"
+}
+
+@test "classify_wfr: API-only detected as low risk" {
+  run _run_classify_wfr "$FIXTURES_DIR/workflows/workflow-run-api-only.yml"
+  assert_success
+  assert_output --partial "API-only"
+}
+
+@test "classify_wfr: no workflow_run returns empty" {
+  run _run_classify_wfr "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "analyze_repo: workflow-run-artifact reports in wfr column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/workflow-run-artifact.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "download-artifact"
+}
+
+# =============================================================================
+# Self-hosted runner detection (6c6)
+# =============================================================================
+
+@test "self-hosted-runner: detects runs-on: self-hosted" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/self-hosted-runner.yml' | grep -qiE 'runs-on:.*self-hosted'"
+  assert_success
+}
+
+@test "self-hosted-custom-label: detects self-hosted in array" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/self-hosted-custom-label.yml' | grep -qiE 'runs-on:.*self-hosted'"
+  assert_success
+}
+
+@test "self-hosted-in-comment: commented-out self-hosted NOT detected" {
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/self-hosted-in-comment.yml' | grep -qiE 'runs-on:.*self-hosted'"
+  assert_failure
+}
+
+_run_classify_self_hosted() {
+  local fixture="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo 'classify_self_hosted "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_self_hosted: detects self-hosted runner" {
+  run _run_classify_self_hosted "$FIXTURES_DIR/workflows/self-hosted-runner.yml"
+  assert_success
+  assert_output --partial "self-hosted"
+}
+
+@test "classify_self_hosted: detects self-hosted in label array" {
+  run _run_classify_self_hosted "$FIXTURES_DIR/workflows/self-hosted-custom-label.yml"
+  assert_success
+  assert_output --partial "self-hosted"
+}
+
+@test "classify_self_hosted: commented-out self-hosted returns empty" {
+  run _run_classify_self_hosted "$FIXTURES_DIR/workflows/self-hosted-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_self_hosted: github-hosted runner returns empty" {
+  run _run_classify_self_hosted "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "analyze_repo: self-hosted runner reported in output" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/self-hosted-runner.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "self-hosted"
+}
+
+@test "analyze_repo: github-hosted runner has No in self-hosted column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # Self-hosted column should be "No"
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  local sh_col
+  sh_col=$(echo "$md_row" | cut -d'|' -f8)
+  [ "$sh_col" = "No" ]
+}
+
+# =============================================================================
+# Dangerous permissions values detection (zys)
+# =============================================================================
+
+_run_classify_dangerous_perms() {
+  local fixture="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo 'classify_dangerous_perms "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_dangerous_perms: detects write-all" {
+  run _run_classify_dangerous_perms "$FIXTURES_DIR/workflows/dangerous-perms-write-all.yml"
+  assert_success
+  assert_output --partial "write-all"
+}
+
+@test "classify_dangerous_perms: detects contents:write" {
+  run _run_classify_dangerous_perms "$FIXTURES_DIR/workflows/dangerous-perms-contents-write.yml"
+  assert_success
+  assert_output --partial "contents: write"
+}
+
+@test "classify_dangerous_perms: safe read-only perms return empty" {
+  run _run_classify_dangerous_perms "$FIXTURES_DIR/workflows/safe-perms-read.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_dangerous_perms: no permissions block returns empty" {
+  run _run_classify_dangerous_perms "$FIXTURES_DIR/workflows/permissions-none.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "analyze_repo: dangerous-perms-write-all reports write-all" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/dangerous-perms-write-all.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "write-all"
+}
+
+@test "analyze_repo: safe-perms-read has No in dangerous perms column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/safe-perms-read.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # Dangerous perms column should be "No"
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  local dp_col
+  dp_col=$(echo "$md_row" | cut -d'|' -f9)
+  [ "$dp_col" = "No" ]
 }
 
 # =============================================================================

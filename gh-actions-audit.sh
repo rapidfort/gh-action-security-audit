@@ -448,6 +448,71 @@ classify_expr_injection() {
   echo "${detail}|${detail_csv}"
 }
 
+# --- classify_wfr: classify a workflow_run trigger workflow ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if no workflow_run trigger)
+# Sub-classification: download-artifact (HIGH), checkout (MEDIUM), API-only (LOW)
+classify_wfr() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+
+  [[ $wf_uncommented == *workflow_run* ]] || return 0
+
+  local detail="" detail_csv=""
+  if [[ $wf_uncommented == *download-artifact* ]]; then
+    detail="$wf_name (**download-artifact**)"
+    detail_csv="$wf_name (download-artifact)"
+  elif [[ $wf_uncommented == *actions/checkout* ]]; then
+    detail="$wf_name (checkout)"
+    detail_csv="$wf_name (checkout)"
+  else
+    detail="$wf_name (API-only)"
+    detail_csv="$wf_name (API-only)"
+  fi
+
+  echo "${detail}|${detail_csv}"
+}
+
+# --- classify_self_hosted: detect self-hosted runner usage ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if no self-hosted runners)
+classify_self_hosted() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+
+  if grep -qiE 'runs-on:.*self-hosted' <<<"$wf_uncommented"; then
+    echo "$wf_name (**self-hosted**)|$wf_name (self-hosted)"
+  fi
+}
+
+# --- classify_dangerous_perms: detect dangerous permissions grants ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if no dangerous grants)
+classify_dangerous_perms() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+
+  local dangers=()
+
+  # Check for write-all (blanket write)
+  if grep -qE '^\s*permissions:\s*write-all' <<<"$wf_uncommented"; then
+    dangers+=("write-all")
+  fi
+
+  # Check for specific dangerous permission grants
+  local perm
+  for perm in "contents: write" "actions: write" "packages: write" "id-token: write"; do
+    if grep -qE "^\s+${perm}" <<<"$wf_uncommented"; then
+      dangers+=("$perm")
+    fi
+  done
+
+  [ ${#dangers[@]} -eq 0 ] && return 0
+
+  local danger_list
+  danger_list=$(printf '%s, ' "${dangers[@]}")
+  danger_list="${danger_list%, }"
+
+  echo "$wf_name (**${danger_list}**)|$wf_name (${danger_list})"
+}
+
 # --- classify_unpinned: report pinned vs unpinned action refs in a workflow ---
 # Args: wf_name wf_content wf_uncommented
 # Outputs: md_detail|csv_detail (or empty string if no uses: lines)
@@ -504,6 +569,12 @@ analyze_repo() {
   local unpin_wfs_csv=()
   local expr_wfs=()
   local expr_wfs_csv=()
+  local wfr_wfs=()
+  local wfr_wfs_csv=()
+  local sh_wfs=()
+  local sh_wfs_csv=()
+  local dp_wfs=()
+  local dp_wfs_csv=()
 
   local f wf_name wf_content wf_uncommented
 
@@ -548,6 +619,32 @@ analyze_repo() {
       expr_wfs+=("${expr_result%%|*}")
       expr_wfs_csv+=("${expr_result#*|}")
     fi
+
+    # --- workflow_run ---
+    if [[ $wf_uncommented == *workflow_run* ]]; then
+      local wfr_result
+      wfr_result=$(classify_wfr "$wf_name" "$wf_content" "$wf_uncommented")
+      if [ -n "$wfr_result" ]; then
+        wfr_wfs+=("${wfr_result%%|*}")
+        wfr_wfs_csv+=("${wfr_result#*|}")
+      fi
+    fi
+
+    # --- Self-hosted runners ---
+    local sh_result
+    sh_result=$(classify_self_hosted "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$sh_result" ]; then
+      sh_wfs+=("${sh_result%%|*}")
+      sh_wfs_csv+=("${sh_result#*|}")
+    fi
+
+    # --- Dangerous permissions ---
+    local dp_result
+    dp_result=$(classify_dangerous_perms "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$dp_result" ]; then
+      dp_wfs+=("${dp_result%%|*}")
+      dp_wfs_csv+=("${dp_result#*|}")
+    fi
   done
 
   # --- Build cells ---
@@ -579,6 +676,18 @@ analyze_repo() {
   expr_cell=$(join_array_cells '<br/>' "${expr_wfs[@]+"${expr_wfs[@]}"}")
   expr_csv=$(join_array_cells '; ' "${expr_wfs_csv[@]+"${expr_wfs_csv[@]}"}")
 
+  local wfr_cell wfr_csv
+  wfr_cell=$(join_array_cells '<br/>' "${wfr_wfs[@]+"${wfr_wfs[@]}"}")
+  wfr_csv=$(join_array_cells '; ' "${wfr_wfs_csv[@]+"${wfr_wfs_csv[@]}"}")
+
+  local sh_cell sh_csv
+  sh_cell=$(join_array_cells '<br/>' "${sh_wfs[@]+"${sh_wfs[@]}"}")
+  sh_csv=$(join_array_cells '; ' "${sh_wfs_csv[@]+"${sh_wfs_csv[@]}"}")
+
+  local dp_cell dp_csv
+  dp_cell=$(join_array_cells '<br/>' "${dp_wfs[@]+"${dp_wfs[@]}"}")
+  dp_csv=$(join_array_cells '; ' "${dp_wfs_csv[@]+"${dp_wfs_csv[@]}"}")
+
   local secrets_cell=""
   local secret_names
   secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
@@ -592,8 +701,8 @@ analyze_repo() {
   fi
 
   # Output: markdown row, then csv row
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${secrets_cell}"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${secrets_cell}"
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${secrets_cell}"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${secrets_cell}"
 }
 
 # Temp files to accumulate table rows
@@ -784,16 +893,24 @@ Columns:
 - **Expression Injection**: Dangerous `${{ }}` expressions used directly in `run:` blocks. User-controlled
   values like `github.event.pull_request.title` or `github.head_ref` can inject arbitrary shell commands
   when interpolated into `run:` scripts. The safe alternative is to assign to an `env:` variable first.
+- **`workflow_run`**: Workflows triggered by `workflow_run` bypass fork PR restrictions and run with
+  write permissions and secrets. Sub-classified by risk: download-artifact (HIGH — artifact poisoning),
+  checkout (MEDIUM), API-only (LOW).
+- **Self-Hosted Runners**: Workflows using `runs-on: self-hosted` (or custom labels). Self-hosted runners
+  are persistent machines — a compromised runner gives attackers host network access and cached credentials.
+  Especially dangerous when combined with `pull_request_target` or `issue_comment` triggers.
+- **Dangerous Permissions**: Workflows granting elevated permissions like `write-all`, `contents: write`,
+  `actions: write`, or `id-token: write`. A `permissions:` block exists but grants excessive access.
 - **Repo Secrets**: Secret names configured directly on the repo (not values). These are accessible
   to any workflow that runs in the repo, including exploited `pull_request_target` workflows.
 
 PERREPO
 
-  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expression Injection | Repo Secrets |"
-  echo "|------------|-------------|----------------------|-----------------|-----------------|---------------------|--------------|"
+  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expr Injection | \`workflow_run\` | Self-Hosted | Dangerous Perms | Repo Secrets |"
+  echo "|------------|-------------|----------------------|-----------------|-----------------|----------------|---------------|-------------|-----------------|--------------|"
 
-  while IFS='|' read -r repo perms prt ic unpin expr secrets; do
-    echo "| \`$repo\` | $perms | $prt | $ic | $unpin | $expr | $secrets |"
+  while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp secrets; do
+    echo "| \`$repo\` | $perms | $prt | $ic | $unpin | $expr | $wfr | $sh | $dp | $secrets |"
   done < <(sort "$TABLE_ROWS_FILE")
 
   # --- Org secrets section ---
@@ -904,15 +1021,18 @@ if [ -n "$CSV_FILE" ]; then
   }
 
   {
-    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,Repo Secrets"
-    while IFS='|' read -r repo perms prt ic unpin expr secrets; do
-      printf '%s,%s,%s,%s,%s,%s,%s\n' \
+    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Repo Secrets"
+    while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp secrets; do
+      printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
         "$(csv_field "$repo")" \
         "$(csv_field "$perms")" \
         "$(csv_field "$prt")" \
         "$(csv_field "$ic")" \
         "$(csv_field "$unpin")" \
         "$(csv_field "$expr")" \
+        "$(csv_field "$wfr")" \
+        "$(csv_field "$sh")" \
+        "$(csv_field "$dp")" \
         "$(csv_field "$secrets")"
     done < <(sort "$TABLE_ROWS_CSV_FILE")
 

@@ -924,11 +924,38 @@ Columns:
 
 PERREPO
 
+  # --- Summary statistics ---
+  # Fields: repo(1)|perms(2)|prt(3)|ic(4)|unpin(5)|expr(6)|wfr(7)|sh(8)|dp(9)|secrets(10)
+  total_repos_scanned=$(wc -l <"$TABLE_ROWS_FILE" | tr -d ' ')
+  no_perms_count=$(awk -F'|' '$2 ~ /None/ {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  prt_count=$(awk -F'|' '$3 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  ic_count=$(awk -F'|' '$4 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  unpin_count=$(awk -F'|' '$5 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  expr_count=$(awk -F'|' '$6 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  wfr_count=$(awk -F'|' '$7 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  sh_count=$(awk -F'|' '$8 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  dp_count=$(awk -F'|' '$9 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+
+  echo "### Summary"
+  echo ""
+  echo "| Metric | Count |"
+  echo "|--------|-------|"
+  echo "| Repos scanned | $total_repos_scanned |"
+  echo "| Repos with no \`permissions:\` blocks | $no_perms_count |"
+  [ "$prt_count" -gt 0 ] && echo "| Repos with \`pull_request_target\` | $prt_count |"
+  [ "$ic_count" -gt 0 ] && echo "| Repos with \`issue_comment\` | $ic_count |"
+  [ "$unpin_count" -gt 0 ] && echo "| Repos with unpinned actions | $unpin_count |"
+  [ "$expr_count" -gt 0 ] && echo "| Repos with expression injection risk | $expr_count |"
+  [ "$wfr_count" -gt 0 ] && echo "| Repos with \`workflow_run\` | $wfr_count |"
+  [ "$sh_count" -gt 0 ] && echo "| Repos with self-hosted runners | $sh_count |"
+  [ "$dp_count" -gt 0 ] && echo "| Repos with dangerous permissions | $dp_count |"
+  echo ""
+
   echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expr Injection | \`workflow_run\` | Self-Hosted | Dangerous Perms | Repo Secrets |"
   echo "|------------|-------------|----------------------|-----------------|-----------------|----------------|---------------|-------------|-----------------|--------------|"
 
   while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp secrets; do
-    echo "| \`$repo\` | $perms | $prt | $ic | $unpin | $expr | $wfr | $sh | $dp | $secrets |"
+    echo "| [\`$repo\`](https://github.com/$ORG/$repo/tree/HEAD/.github/workflows) | $perms | $prt | $ic | $unpin | $expr | $wfr | $sh | $dp | $secrets |"
   done < <(sort "$TABLE_ROWS_FILE")
 
   # --- Org secrets section ---

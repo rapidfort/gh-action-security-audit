@@ -262,6 +262,14 @@ _run_require_arg() {
   assert_output --partial "requires a filename"
 }
 
+# --- --repo requires a repository name ---
+
+@test "--repo without argument exits with error" {
+  run bash "$SCRIPT" my-org --repo
+  assert_failure
+  assert_output --partial "requires a repository name"
+}
+
 # =============================================================================
 # Structural: robustness checks (ct5, i45, 1rx)
 # =============================================================================

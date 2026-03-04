@@ -88,3 +88,22 @@ teardown() {
   assert_output --partial "high"
   assert_output --partial "medium"
 }
+
+@test "smoke: --repo filters to single repo" {
+  run bash "$SCRIPT" test-org --local "$SMOKE_DIR" --repo safe-repo \
+    --out "$SMOKE_MD" --csv "$SMOKE_CSV" --hdf "$SMOKE_HDF"
+  assert_success
+
+  [ -s "$SMOKE_MD" ]
+  run grep "safe-repo" "$SMOKE_MD"
+  assert_success
+  run grep "vuln-repo" "$SMOKE_MD"
+  assert_failure
+}
+
+@test "smoke: --repo with nonexistent repo fails" {
+  run bash "$SCRIPT" test-org --local "$SMOKE_DIR" --repo no-such-repo \
+    --out "$SMOKE_MD" --csv "$SMOKE_CSV" --hdf "$SMOKE_HDF"
+  assert_failure
+  assert_output --partial "not found in local data"
+}

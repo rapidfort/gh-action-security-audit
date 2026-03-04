@@ -37,6 +37,9 @@
 #                    structured format used by MITRE Heimdall and other
 #                    security tooling. Omit this flag to skip HDF generation.
 #
+#   --repo REPO      Audit a single repository instead of the entire org.
+#                    Useful for quick checks or PR gates.
+#
 #   --cleanup        Delete cached workflow files after the run completes.
 #                    By default the script keeps them for reuse with --local.
 #
@@ -135,6 +138,7 @@ require_arg() {
 
 LOCAL_DIR=""
 ORG=""
+REPO=""
 OUT_FILE=""
 CSV_FILE=""
 HDF_FILE=""
@@ -161,6 +165,11 @@ while [[ $# -gt 0 ]]; do
     --hdf)
       require_arg "--hdf" "${2:-}" "a filename" "report.json"
       HDF_FILE="$2"
+      shift 2
+      ;;
+    --repo)
+      require_arg "--repo" "${2:-}" "a repository name" "my-repo"
+      REPO="$2"
       shift 2
       ;;
     --cleanup)
@@ -360,8 +369,15 @@ if [ -n "$LOCAL_DIR" ]; then
   for d in "$WORKFLOWS_DIR/$ORG"/*/; do
     [ -d "$d" ] || continue
     repo_name=$(basename "$d")
+    if [ -n "$REPO" ] && [ "$repo_name" != "$REPO" ]; then
+      continue
+    fi
     REPOS+=("$repo_name")
   done
+  if [ -n "$REPO" ] && [ ${#REPOS[@]} -eq 0 ]; then
+    crit "Repo '$REPO' not found in local data at $WORKFLOWS_DIR/$ORG/"
+    exit 1
+  fi
   info "Found ${#REPOS[@]} repos in local data"
 else
   info "Enumerating non-archived repos with workflows..."
@@ -376,6 +392,15 @@ else
     exit 1
   fi
   total_repos=$(grep -c . <<<"$all_repos" || echo 0)
+
+  if [ -n "$REPO" ]; then
+    if ! grep -qx "$REPO" <<<"$all_repos"; then
+      crit "Repo '$REPO' not found in org '$ORG' (or is archived)."
+      exit 1
+    fi
+    all_repos="$REPO"
+    total_repos=1
+  fi
 
   if [ "$total_repos" -ge 1000 ]; then
     warn "Repo list hit 1000 limit — some repos may be missing from the audit."

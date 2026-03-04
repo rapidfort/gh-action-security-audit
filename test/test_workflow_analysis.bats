@@ -604,6 +604,24 @@ _run_classify_expr_injection() {
   assert_output ""
 }
 
+@test "classify_expr_injection: workflow_dispatch inputs.* detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/dispatch-input-injection.yml"
+  assert_success
+  assert_output --partial "inputs."
+}
+
+@test "classify_expr_injection: repository_dispatch client_payload detected" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/dispatch-client-payload.yml"
+  assert_success
+  assert_output --partial "client_payload."
+}
+
+@test "classify_expr_injection: dispatch with env: block is safe" {
+  run _run_classify_expr_injection "$FIXTURES_DIR/workflows/dispatch-safe.yml"
+  assert_success
+  assert_output ""
+}
+
 # --- analyze_repo integration tests for expression injection ---
 
 @test "analyze_repo: expr-injection-pr-title reports expression injection" {

@@ -337,7 +337,7 @@ else
     REPOS+=("$repo")
   done <<<"$all_repos"
 
-  printf "%-80s\n" " " # clear progress line
+  printf '\033[2K\r' # clear progress line
   info "Downloaded $downloaded workflow files from ${#REPOS[@]} repos ($skipped_no_wf repos had no workflows)"
 fi
 
@@ -446,7 +446,9 @@ classify_expr_injection() {
   [ -z "$run_content" ] && return 0
 
   # Pattern for dangerous user-controlled expressions
-  local dangerous_pattern='github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[)|github\.head_ref'
+  # Includes: github.event.* user-controlled fields, github.head_ref,
+  # inputs.* (workflow_dispatch), github.event.client_payload.* (repository_dispatch)
+  local dangerous_pattern='github\.event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[|client_payload\.)|github\.head_ref|inputs\.'
 
   # Find dangerous expressions in run: block content
   local found
@@ -739,7 +741,7 @@ for repo in "${REPOS[@]}"; do
   progress "$repo"
 done
 
-printf "%-80s\n" " " # clear progress line
+printf '\033[2K\r' # clear progress line
 info "Workflow analysis complete."
 
 # =============================================================================
@@ -818,7 +820,7 @@ if [ -n "$org_secrets" ]; then
   done <<<"$org_secrets"
 fi
 
-printf "%-80s\n" " " # clear progress line
+printf '\033[2K\r' # clear progress line
 info "Org secrets enumeration complete."
 
 # =============================================================================

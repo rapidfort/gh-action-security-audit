@@ -26,9 +26,10 @@ setup() {
   mock_gh_response_args api "orgs/test-org/actions/permissions/workflow" \
     --jq '(.default_workflow_permissions // "unknown") + "|" + ((.can_approve_pull_request_reviews // "unknown") | tostring)' \
     -- 'read|false'
-  # Allowed actions
+  # Actions permissions (allowed_actions, enabled_repositories, sha_pinning_required)
   mock_gh_response_args api "orgs/test-org/actions/permissions" \
-    --jq '.allowed_actions // "unknown"' -- "selected"
+    --jq '(.allowed_actions // "unknown") + "|" + (.enabled_repositories // "unknown") + "|" + ((.sha_pinning_required // false) | tostring)' \
+    -- "selected|selected|false"
 
   # Repo secrets — return empty for each
   mock_gh_response_args api "repos/test-org/repo-with-prt/actions/secrets" --jq '.secrets[].name' -- ""

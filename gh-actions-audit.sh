@@ -1352,6 +1352,26 @@ _hdf_result_GHA_029() {
   fi
 }
 
+# GHA-027: Org SHA pinning enforcement
+# Args: $1=sha_pinning_required ("true", "false", or "unknown")
+_hdf_result_GHA_027() {
+  if [ "$1" = "true" ]; then
+    printf 'passed|sha_pinning_required is true'
+  else
+    printf 'failed|sha_pinning_required is %s|Enable SHA pinning enforcement in org settings' "$1"
+  fi
+}
+
+# GHA-028: Org enabled_repositories restriction
+# Args: $1=enabled_repositories ("all", "selected", "none", or "unknown")
+_hdf_result_GHA_028() {
+  if [ "$1" = "selected" ] || [ "$1" = "none" ]; then
+    printf 'passed|enabled_repositories is %s' "$1"
+  else
+    printf 'failed|enabled_repositories is %s|Restrict to selected repositories, not %s' "$1" "$1"
+  fi
+}
+
 # build_hdf_repo_target: produce an HDF v2 target JSON object for a single repo.
 # Reads classifier results from a pre-built cache file.
 # Args: repo repo_dir cache_file
@@ -1666,6 +1686,8 @@ build_hdf_org_target() {
   local can_approve_prs="$3"
   local allowed_actions="$4"
   local org_secrets_file="${5:-}"
+  local enabled_repositories="${6:-unknown}"
+  local sha_pinning_required="${7:-unknown}"
 
   local reqs=()
   local profile_yaml="${HDF_PROFILE_DIR:-${BASH_SOURCE[0]%/*}/hdf-profile}/requirements.yaml"
@@ -1679,6 +1701,8 @@ build_hdf_org_target() {
           GHA-011) result=$(_hdf_result_GHA_011 "$default_wf_perm") ;;
           GHA-012) result=$(_hdf_result_GHA_012 "$can_approve_prs") ;;
           GHA-013) result=$(_hdf_result_GHA_013 "$allowed_actions") ;;
+          GHA-027) result=$(_hdf_result_GHA_027 "$sha_pinning_required") ;;
+          GHA-028) result=$(_hdf_result_GHA_028 "$enabled_repositories") ;;
           GHA-029) result=$(_hdf_result_GHA_029 "$org_secrets_file") ;;
           *) result="notReviewed|Detection not yet implemented" ;;
         esac
@@ -1944,13 +1968,18 @@ wf_perms_response=$(gh api "orgs/$ORG/actions/permissions/workflow" \
 }
 default_wf_perm="${wf_perms_response%%|*}"
 can_approve_prs="${wf_perms_response#*|}"
-allowed_actions=$(gh api "orgs/$ORG/actions/permissions" --jq '.allowed_actions // "unknown"' 2>/dev/null) || {
+org_perms_response=$(gh api "orgs/$ORG/actions/permissions" \
+  --jq '(.allowed_actions // "unknown") + "|" + (.enabled_repositories // "unknown") + "|" + ((.sha_pinning_required // false) | tostring)' 2>/dev/null) || {
   warn "Could not fetch org actions permissions (check admin:org scope)."
-  allowed_actions="unknown"
+  org_perms_response="unknown|unknown|unknown"
 }
+allowed_actions="${org_perms_response%%|*}"
+local_rest="${org_perms_response#*|}"
+enabled_repositories="${local_rest%%|*}"
+sha_pinning_required="${local_rest#*|}"
 
 # --- Build HDF v2 document ---
-HDF_ORG_TARGET_JSON=$(build_hdf_org_target "$ORG" "$default_wf_perm" "$can_approve_prs" "$allowed_actions" "$ORG_SECRETS_FILE")
+HDF_ORG_TARGET_JSON=$(build_hdf_org_target "$ORG" "$default_wf_perm" "$can_approve_prs" "$allowed_actions" "$ORG_SECRETS_FILE" "$enabled_repositories" "$sha_pinning_required")
 build_hdf_wrapper "$ORG" "$HDF_REPO_TARGETS_FILE" "$HDF_ORG_TARGET_JSON" >"$HDF_OUTPUT_FILE"
 
 if [ -n "$HDF_FILE" ]; then

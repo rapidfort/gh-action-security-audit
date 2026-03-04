@@ -613,6 +613,8 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_011()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_012()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_013()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_027()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_028()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_029()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_org_target()/,/^}/p' "$SCRIPT"
 }
@@ -620,11 +622,13 @@ PREAMBLE
 _run_hdf_org_target() {
   local org="$1" default_perm="$2" can_approve="$3" allowed="$4"
   local org_secrets_file="${5:-}"
+  local enabled_repos="${6:-selected}"
+  local sha_pinning="${7:-false}"
   local tmpscript
   tmpscript=$(mktemp)
   {
     _hdf_org_preamble
-    echo "build_hdf_org_target '$org' '$default_perm' '$can_approve' '$allowed' '$org_secrets_file'"
+    echo "build_hdf_org_target '$org' '$default_perm' '$can_approve' '$allowed' '$org_secrets_file' '$enabled_repos' '$sha_pinning'"
   } >"$tmpscript"
   local rc=0
   bash "$tmpscript" || rc=$?
@@ -740,26 +744,52 @@ _run_hdf_org_target() {
   rm -f "$secrets_file"
 }
 
+# --- GHA-027: Org SHA pinning ---
+
+@test "build_hdf_org_target: GHA-027 passed when sha_pinning_required is true" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "" "selected" "true"
+  assert_success
+  assert_output --partial '"GHA-027"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-027 failed when sha_pinning_required is false" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "" "selected" "false"
+  assert_success
+  assert_output --partial '"GHA-027"'
+  assert_output --partial '"failed"'
+}
+
+# --- GHA-028: Org enabled_repositories ---
+
+@test "build_hdf_org_target: GHA-028 passed when enabled_repositories is selected" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "" "selected" "false"
+  assert_success
+  assert_output --partial '"GHA-028"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-028 failed when enabled_repositories is all" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "" "all" "false"
+  assert_success
+  assert_output --partial '"GHA-028"'
+  assert_output --partial '"failed"'
+}
+
 # --- All org requirement IDs present ---
 
 @test "build_hdf_org_target: all 6 org-level requirement IDs present" {
   run _run_hdf_org_target "test-org" "read" "false" "selected"
   assert_success
-  # 4 implemented org checks
-  assert_output --partial '"GHA-011"'
-  assert_output --partial '"GHA-012"'
-  assert_output --partial '"GHA-013"'
-  assert_output --partial '"GHA-029"'
-  # 2 unimplemented org checks
-  assert_output --partial '"GHA-027"'
-  assert_output --partial '"GHA-028"'
+  for id in GHA-011 GHA-012 GHA-013 GHA-027 GHA-028 GHA-029; do
+    assert_output --partial "\"$id\""
+  done
 }
 
-@test "build_hdf_org_target: unimplemented org requirements have notReviewed status" {
+@test "build_hdf_org_target: all org requirements are implemented (no notReviewed)" {
   run _run_hdf_org_target "test-org" "read" "false" "selected"
   assert_success
-  assert_output --partial '"notReviewed"'
-  assert_output --partial "Detection not yet implemented"
+  refute_output --partial "Detection not yet implemented"
 }
 
 @test "build_hdf_org_target: per-repo requirement IDs NOT included" {
@@ -773,29 +803,29 @@ _run_hdf_org_target() {
 
 # --- Combined pass/fail scenarios ---
 
-@test "build_hdf_org_target: all four implemented checks fail" {
+@test "build_hdf_org_target: all six implemented checks fail" {
   local secrets_file
   secrets_file=$(mktemp)
   echo "LEAK|All repositories|(all)|repo-a|gh secret set LEAK" >"$secrets_file"
-  run _run_hdf_org_target "test-org" "write" "true" "all" "$secrets_file"
+  run _run_hdf_org_target "test-org" "write" "true" "all" "$secrets_file" "all" "false"
   assert_success
-  # Count failed occurrences — should be at least 4 (011, 012, 013, 029)
+  # Count failed occurrences — should be 6 (011, 012, 013, 027, 028, 029)
   local fail_count
   fail_count=$(echo "$output" | grep -o '"failed"' | wc -l | tr -d ' ')
-  [ "$fail_count" -ge 4 ]
+  [ "$fail_count" -ge 6 ]
   rm -f "$secrets_file"
 }
 
-@test "build_hdf_org_target: all four implemented checks pass" {
+@test "build_hdf_org_target: all six implemented checks pass" {
   local secrets_file
   secrets_file=$(mktemp)
   echo "GOOD|Selected|repo-a|repo-a|" >"$secrets_file"
-  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file"
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file" "selected" "true"
   assert_success
-  # All 4 implemented checks should pass (011, 012, 013, 029)
+  # All 6 implemented checks should pass (011, 012, 013, 027, 028, 029)
   local pass_count
   pass_count=$(echo "$output" | grep -o '"passed"' | wc -l | tr -d ' ')
-  [ "$pass_count" -ge 4 ]
+  [ "$pass_count" -ge 6 ]
   rm -f "$secrets_file"
 }
 

@@ -69,6 +69,8 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_024()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_025()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_026()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_027()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_028()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_029()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_org_target()/,/^}/p' "$SCRIPT"
@@ -142,7 +144,7 @@ LOOP
     done
     # Build org target + assemble wrapper (same pattern as after Phase 4)
     cat <<ASSEMBLE
-HDF_ORG_TARGET_JSON=\$(build_hdf_org_target '${org}' '${default_perm}' '${can_approve}' '${allowed}')
+HDF_ORG_TARGET_JSON=\$(build_hdf_org_target '${org}' '${default_perm}' '${can_approve}' '${allowed}' '' 'selected' 'false')
 build_hdf_wrapper '${org}' "\$HDF_REPO_TARGETS_FILE" "\$HDF_ORG_TARGET_JSON" >"\$HDF_OUTPUT_FILE"
 cat "\$HDF_OUTPUT_FILE"
 rm -f "\$HDF_REPO_TARGETS_FILE" "\$HDF_OUTPUT_FILE" "\$CACHE_FILE"

@@ -737,7 +737,7 @@
     - CM-6
   owasp_cicd: CICD-SEC-3
   classifier: org_sha_pinning
-  implemented: false
+  implemented: true
   card: 4yh
 
 - id: GHA-029
@@ -788,5 +788,5 @@
     - CM-7
   owasp_cicd: CICD-SEC-1
   classifier: org_enabled_repositories
-  implemented: false
+  implemented: true
   card: 4yh

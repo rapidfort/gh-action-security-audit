@@ -237,7 +237,7 @@ else
 
   # Get all non-archived repos
   all_repos=$(gh repo list "$ORG" --limit 1000 --no-archived --json name --jq '.[].name' 2>/dev/null)
-  total_repos=$(echo "$all_repos" | grep -c . || echo 0)
+  total_repos=$(grep -c . <<<"$all_repos" || echo 0)
 
   if [ "$total_repos" -ge 1000 ]; then
     warn "Repo list hit 1000 limit — some repos may be missing from the audit."
@@ -273,7 +273,6 @@ else
     done <<<"$wf_list"
 
     REPOS+=("$repo")
-    sleep 0.1
   done <<<"$all_repos"
 
   printf "%-80s\n" " " # clear progress line
@@ -285,6 +284,61 @@ fi
 # =============================================================================
 
 info "Analyzing workflows..."
+
+# --- classify_prt: classify a pull_request_target workflow ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail
+classify_prt() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local has_checkout=0 has_fork_ref=0 has_author_guard=0 is_dependabot=0
+
+  [[ $wf_content == *actions/checkout* ]] && has_checkout=1
+  grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' <<<"$wf_content" && has_fork_ref=1
+  grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" <<<"$wf_content" && is_dependabot=1
+  grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" <<<"$wf_content" && has_author_guard=1
+  grep -q 'author_association' <<<"$wf_uncommented" && has_author_guard=1
+
+  local dep_tag=""
+  [ "$is_dependabot" = "1" ] && dep_tag=" (Dependabot)"
+
+  local detail detail_csv
+  if [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "0" ]; then
+    detail="$wf_name$dep_tag (**checkout+exec, no guard**)"
+    detail_csv="$wf_name$dep_tag (checkout+exec; no guard)"
+  elif [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "1" ]; then
+    detail="$wf_name$dep_tag (checkout, has guard)"
+    detail_csv="$wf_name$dep_tag (checkout; has guard)"
+  elif [ "$has_checkout" = "1" ]; then
+    detail="$wf_name$dep_tag (checkout, no fork ref)"
+    detail_csv="$wf_name$dep_tag (checkout; no fork ref)"
+  else
+    detail="$wf_name$dep_tag (API-only)"
+    detail_csv="$wf_name$dep_tag (API-only)"
+  fi
+
+  echo "${detail}|${detail_csv}"
+}
+
+# --- classify_ic: classify an issue_comment workflow ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail
+classify_ic() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local detail detail_csv
+
+  if grep -q 'author_association' <<<"$wf_uncommented"; then
+    detail="$wf_name (has author_association)"
+    detail_csv="$wf_name (has author_association)"
+  elif grep -qE "user\.login\s*==|actor\s*==" <<<"$wf_content"; then
+    detail="$wf_name (has actor check)"
+    detail_csv="$wf_name (has actor check)"
+  else
+    detail="$wf_name (**no author gate**)"
+    detail_csv="$wf_name (no author gate)"
+  fi
+
+  echo "${detail}|${detail_csv}"
+}
 
 # --- analyze_repo: analyze a single repo's workflow files ---
 # Outputs two lines to stdout: markdown row, then csv row (pipe-delimited)
@@ -308,65 +362,31 @@ analyze_repo() {
   local ic_wfs_csv=()
 
   local f wf_name wf_content wf_uncommented
-  local has_checkout has_fork_ref has_author_guard is_dependabot
-  local dep_tag detail detail_csv
 
   for f in "${wf_files[@]}"; do
     wf_name=$(basename "$f")
     wf_content=$(cat "$f" 2>/dev/null) || continue
-    wf_uncommented=$(echo "$wf_content" | grep -v '^\s*#')
+    wf_uncommented=$(grep -v '^\s*#' <<<"$wf_content")
 
     # --- Permissions ---
-    if echo "$wf_uncommented" | grep -q 'permissions:'; then
+    if grep -q 'permissions:' <<<"$wf_uncommented"; then
       wf_with_perms=$((wf_with_perms + 1))
     fi
 
     # --- pull_request_target ---
     if [[ $wf_content == *pull_request_target* ]]; then
-      has_checkout=0
-      has_fork_ref=0
-      has_author_guard=0
-      is_dependabot=0
-
-      [[ $wf_content == *actions/checkout* ]] && has_checkout=1
-      echo "$wf_content" | grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' && has_fork_ref=1
-      echo "$wf_content" | grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" && is_dependabot=1
-      echo "$wf_content" | grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" && has_author_guard=1
-      echo "$wf_uncommented" | grep -q 'author_association' && has_author_guard=1
-
-      dep_tag=""
-      [ "$is_dependabot" = "1" ] && dep_tag=" (Dependabot)"
-
-      if [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "0" ]; then
-        detail="$wf_name$dep_tag (**checkout+exec, no guard**)"
-        detail_csv="$wf_name$dep_tag (checkout+exec; no guard)"
-      elif [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "1" ]; then
-        detail="$wf_name$dep_tag (checkout, has guard)"
-        detail_csv="$wf_name$dep_tag (checkout; has guard)"
-      elif [ "$has_checkout" = "1" ]; then
-        detail="$wf_name$dep_tag (checkout, no fork ref)"
-        detail_csv="$wf_name$dep_tag (checkout; no fork ref)"
-      else
-        detail="$wf_name$dep_tag (API-only)"
-        detail_csv="$wf_name$dep_tag (API-only)"
-      fi
-
-      prt_wfs+=("$detail")
-      prt_wfs_csv+=("$detail_csv")
+      local prt_result
+      prt_result=$(classify_prt "$wf_name" "$wf_content" "$wf_uncommented")
+      prt_wfs+=("${prt_result%%|*}")
+      prt_wfs_csv+=("${prt_result#*|}")
     fi
 
     # --- issue_comment ---
     if [[ $wf_content == *issue_comment* ]]; then
-      if echo "$wf_uncommented" | grep -q 'author_association'; then
-        ic_wfs+=("$wf_name (has author_association)")
-        ic_wfs_csv+=("$wf_name (has author_association)")
-      elif echo "$wf_content" | grep -qE "user\.login\s*==|actor\s*=="; then
-        ic_wfs+=("$wf_name (has actor check)")
-        ic_wfs_csv+=("$wf_name (has actor check)")
-      else
-        ic_wfs+=("$wf_name (**no author gate**)")
-        ic_wfs_csv+=("$wf_name (no author gate)")
-      fi
+      local ic_result
+      ic_result=$(classify_ic "$wf_name" "$wf_content" "$wf_uncommented")
+      ic_wfs+=("${ic_result%%|*}")
+      ic_wfs_csv+=("${ic_result#*|}")
     fi
   done
 
@@ -420,7 +440,7 @@ analyze_repo() {
   if [ -z "$secret_names" ]; then
     secrets_cell="(none)"
   else
-    secrets_cell=$(echo "$secret_names" | paste -sd', ' -)
+    secrets_cell=$(paste -sd', ' - <<<"$secret_names")
   fi
 
   # Output: markdown row, then csv row

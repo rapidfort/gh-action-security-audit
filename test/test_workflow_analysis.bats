@@ -128,26 +128,85 @@ setup() {
 }
 
 # =============================================================================
+# classify_prt() / classify_ic() unit tests
+# =============================================================================
+
+# Helper: run classify_prt or classify_ic on a fixture file
+_run_classifier() {
+  local func="$1" fixture="$2"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo 'content=$(cat "'"$fixture"'")'
+    echo 'uncommented=$(grep -v "^\s*#" <<<"$content")'
+    echo "$func"' "test.yml" "$content" "$uncommented"'
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "classify_prt: checkout+exec no guard detected" {
+  run _run_classifier classify_prt "$FIXTURES_DIR/workflows/prt-checkout-no-guard.yml"
+  assert_success
+  assert_output --partial "checkout+exec, no guard"
+}
+
+@test "classify_prt: checkout with guard detected" {
+  run _run_classifier classify_prt "$FIXTURES_DIR/workflows/prt-checkout-with-guard-single-quote.yml"
+  assert_success
+  assert_output --partial "has guard"
+}
+
+@test "classify_prt: API-only (no checkout) detected" {
+  run _run_classifier classify_prt "$FIXTURES_DIR/workflows/prt-api-only.yml"
+  assert_success
+  assert_output --partial "API-only"
+}
+
+@test "classify_ic: author_association gate detected" {
+  run _run_classifier classify_ic "$FIXTURES_DIR/workflows/issue-comment-with-gate.yml"
+  assert_success
+  assert_output --partial "has author_association"
+}
+
+@test "classify_ic: no gate detected" {
+  run _run_classifier classify_ic "$FIXTURES_DIR/workflows/issue-comment-no-gate.yml"
+  assert_success
+  assert_output --partial "no author gate"
+}
+
+@test "classify_ic: comment-only author_association NOT counted as gate" {
+  run _run_classifier classify_ic "$FIXTURES_DIR/workflows/issue-comment-author-in-comment.yml"
+  assert_success
+  assert_output --partial "no author gate"
+}
+
+# =============================================================================
 # analyze_repo() integration tests
 # =============================================================================
 
-# Helper: extract analyze_repo function from script and call it
+# Helper: extract functions from script for testing
+_script_preamble() {
+  cat <<'PREAMBLE'
+    CYAN='' YELLOW='' RED='' GREEN='' DIM='' RESET=''
+    warn() { printf '[WARN] %s\n' "$*" >&2; }
+    gh() { echo ''; return 0; }
+    export -f gh
+PREAMBLE
+  # Extract classify_prt, classify_ic, and analyze_repo
+  sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"
+  sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
+}
+
 _run_analyze_repo() {
   local repo="$1"
   local repo_dir="$2"
-  # Extract the function definition, helper functions, and call it
   bash -c "
-    # Define color variables and helper functions needed by analyze_repo
-    CYAN='' YELLOW='' RED='' GREEN='' DIM='' RESET=''
-    warn() { printf '[WARN] %s\n' \"\$*\" >&2; }
-    # Set globals
+    $(_script_preamble)
     ORG='test-org'
     WORKFLOWS_DIR='$BATS_TEST_WORKFLOW_DIR'
-    # Extract and define analyze_repo from the script
-    $(sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT")
-    # Mock gh api for secrets (return empty)
-    gh() { echo ''; return 0; }
-    export -f gh
     analyze_repo '$repo' '$repo_dir'
   "
 }

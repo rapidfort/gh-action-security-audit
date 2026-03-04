@@ -35,10 +35,11 @@ setup() {
   mock_gh_response_args api "repos/test-org/repo-clean/actions/secrets" --jq '.secrets[].name' -- ""
 
   REPORT_FILE="$(mktemp)"
+  CSV_REPORT="$(mktemp)"
 }
 
 teardown() {
-  rm -f "$REPORT_FILE"
+  rm -f "$REPORT_FILE" "$CSV_REPORT"
   # Call parent teardown
   if [[ -n "${MOCK_GH_DIR:-}" && -d "${MOCK_GH_DIR:-}" ]]; then
     rm -rf "${MOCK_GH_DIR}"
@@ -94,4 +95,87 @@ teardown() {
   run cat "$REPORT_FILE"
   # "false" maps to "No" in report
   assert_output --partial "| Workflows can approve PRs | No |"
+}
+
+# --- CSV output tests (aov) ---
+
+@test "CSV: --csv flag produces output file" {
+  run bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
+  assert_success
+  [ -s "$CSV_REPORT" ]
+}
+
+@test "CSV: has per-repo header row" {
+  bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
+  run head -1 "$CSV_REPORT"
+  assert_output "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Repo Secrets"
+}
+
+@test "CSV: has org-secrets header after blank line" {
+  bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
+  run cat "$CSV_REPORT"
+  assert_output --partial "Org Secret,Visibility,Configured Access,Referenced In Workflows,Suggested Command"
+}
+
+@test "CSV: contains per-repo data rows" {
+  bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
+  run cat "$CSV_REPORT"
+  assert_output --partial "repo-clean"
+  assert_output --partial "repo-with-prt"
+}
+
+@test "CSV: per-repo and org-secrets sections separated by blank row" {
+  bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
+  # Check that there's an empty line between per-repo data and org-secrets header
+  run awk '/^$/{blank=1; next} blank && /^Org Secret/{found=1} END{print found ? "yes" : "no"}' "$CSV_REPORT"
+  assert_output "yes"
+}
+
+@test "csv_field: plain value passed through unquoted" {
+  # csv_field is defined inside if [ -n CSV_FILE ]; extract it
+  run bash -c '
+    csv_field() {
+      local val="$1"
+      if [[ "$val" == *,* ]] || [[ "$val" == *\"* ]] || [[ "$val" == *$'"'"'\n'"'"'* ]]; then
+        val="${val//\"/\"\"}"
+        printf "%s" "\"$val\""
+      else
+        printf "%s" "$val"
+      fi
+    }
+    csv_field "hello"
+  '
+  assert_output "hello"
+}
+
+@test "csv_field: value with comma is quoted" {
+  run bash -c '
+    csv_field() {
+      local val="$1"
+      if [[ "$val" == *,* ]] || [[ "$val" == *\"* ]] || [[ "$val" == *$'"'"'\n'"'"'* ]]; then
+        val="${val//\"/\"\"}"
+        printf "%s" "\"$val\""
+      else
+        printf "%s" "$val"
+      fi
+    }
+    csv_field "a,b"
+  '
+  assert_output '"a,b"'
+}
+
+@test "csv_field: value with double quotes is escaped and quoted" {
+  run bash -c '
+    csv_field() {
+      local val="$1"
+      if [[ "$val" == *,* ]] || [[ "$val" == *\"* ]] || [[ "$val" == *$'"'"'\n'"'"'* ]]; then
+        val="${val//\"/\"\"}"
+        printf "%s" "\"$val\""
+      else
+        printf "%s" "$val"
+      fi
+    }
+    csv_field "say \"hi\""
+  '
+  assert_output '"say ""hi"""'
 }

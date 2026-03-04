@@ -64,7 +64,7 @@ set -euo pipefail
 # --- Cleanup on exit ---------------------------------------------------------
 
 cleanup() {
-  rm -f "${TABLE_ROWS:-}" "${TABLE_ROWS_CSV:-}" "${ORG_SECRETS_FILE:-}"
+  rm -f "${TABLE_ROWS:-}" "${TABLE_ROWS_CSV:-}" "${ORG_SECRETS_FILE:-}" "${SECRET_MAP_FILE:-}"
 }
 trap cleanup EXIT
 
@@ -464,6 +464,22 @@ org_secrets=$(gh api "orgs/$ORG/actions/secrets" --paginate --jq '.secrets[] | "
 }
 
 if [ -n "$org_secrets" ]; then
+  # Build secret→repo mapping in a single pass over all workflow files.
+  # Format: SECRET_NAME|repo_name (one line per reference, sorted/deduped later)
+  # This avoids O(N×M) grep calls (one per secret × all files).
+  SECRET_MAP_FILE=$(mktemp)
+  while IFS= read -r wf_file; do
+    [ -z "$wf_file" ] && continue
+    repo_name=$(echo "$wf_file" | sed "s|$WORKFLOWS_DIR/$ORG/||" | cut -d/ -f1)
+    # Extract all secret names referenced in this file
+    grep -oE 'secrets\.[A-Za-z0-9_]+' "$wf_file" 2>/dev/null \
+      | sed 's/^secrets\.//' \
+      | sort -u \
+      | while IFS= read -r ref_secret; do
+        echo "${ref_secret}|${repo_name}"
+      done
+  done < <(find "$WORKFLOWS_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null) >>"$SECRET_MAP_FILE"
+
   while IFS='|' read -r secret_name visibility; do
     progress "secret: $secret_name"
 
@@ -488,13 +504,9 @@ if [ -n "$org_secrets" ]; then
         ;;
     esac
 
-    # Grep all downloaded workflows for references to this secret
-    # Use word boundary to prevent partial matching (e.g., FOO matching FOOBAR)
-    referenced_repos=$(grep -rlE "secrets\.$secret_name([^a-zA-Z0-9_]|$)" "$WORKFLOWS_DIR" 2>/dev/null \
-      | sed "s|$WORKFLOWS_DIR/$ORG/||" \
-      | cut -d/ -f1 \
-      | sort -u \
-      | paste -sd',' - || true)
+    # Look up from pre-built map file
+    referenced_repos=$(grep "^${secret_name}|" "$SECRET_MAP_FILE" 2>/dev/null \
+      | cut -d'|' -f2 | sort -u | paste -sd',' - || true)
     [ -z "$referenced_repos" ] && referenced_repos="(none)"
 
     echo "${secret_name}|${vis_display}|${configured_repos}|${referenced_repos}" >>"$ORG_SECRETS_FILE"

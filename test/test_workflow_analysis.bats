@@ -119,10 +119,96 @@ setup() {
   assert_failure
 }
 
-@test "script uses word-boundary grep for secret matching" {
-  run grep 'grep.*-rlE.*secret_name.*a-zA-Z0-9_' "$SCRIPT"
+@test "secret mapping uses single-pass file-based approach" {
+  # Phase 3 should build SECRET_MAP_FILE in one pass, not grep per secret
+  run grep -c 'SECRET_MAP_FILE' "$SCRIPT"
   assert_success
+  local count="${output}"
+  [ "$count" -ge 3 ]
 }
+
+# =============================================================================
+# analyze_repo() integration tests
+# =============================================================================
+
+# Helper: extract analyze_repo function from script and call it
+_run_analyze_repo() {
+  local repo="$1"
+  local repo_dir="$2"
+  # Extract the function definition, helper functions, and call it
+  bash -c "
+    # Define color variables and helper functions needed by analyze_repo
+    CYAN='' YELLOW='' RED='' GREEN='' DIM='' RESET=''
+    warn() { printf '[WARN] %s\n' \"\$*\" >&2; }
+    # Set globals
+    ORG='test-org'
+    WORKFLOWS_DIR='$BATS_TEST_WORKFLOW_DIR'
+    # Extract and define analyze_repo from the script
+    $(sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT")
+    # Mock gh api for secrets (return empty)
+    gh() { echo ''; return 0; }
+    export -f gh
+    analyze_repo '$repo' '$repo_dir'
+  "
+}
+
+@test "analyze_repo: permissions-explicit workflow reports All permissions" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/permissions-explicit.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # First line is markdown row
+  assert_line --index 0 --partial "All (1/1)"
+}
+
+@test "analyze_repo: permissions-none workflow reports None permissions" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/permissions-none.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "**None** (0/1)"
+}
+
+@test "analyze_repo: prt-checkout-no-guard reports checkout+exec, no guard" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/prt-checkout-no-guard.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "checkout+exec, no guard"
+}
+
+@test "analyze_repo: issue-comment-with-gate reports has author_association" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/issue-comment-with-gate.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "has author_association"
+}
+
+@test "analyze_repo: issue-comment-author-in-comment NOT flagged as gated" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/issue-comment-author-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_line --index 0 --partial "no author gate"
+}
+
+@test "analyze_repo: empty directory returns failure" {
+  setup_fixture_dir "test-org" "empty-repo"
+  # No files copied — empty repo dir
+
+  run _run_analyze_repo "empty-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/empty-repo"
+  assert_failure
+}
+
+# =============================================================================
+# Benign workflow (no findings)
+# =============================================================================
 
 @test "benign workflow has no pull_request_target" {
   run grep -q 'pull_request_target' "$FIXTURES_DIR/workflows/benign-workflow.yml"

@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. It produces markdown and optional CSV reports. Runtime dependencies: `bash` (4.0+), `gh` CLI, and standard Unix tools.
+This is a single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. It produces markdown and optional CSV reports. Runtime dependencies: `bash` (3.2+), `gh` CLI, and standard Unix tools.
 
 ## Running the Script
 

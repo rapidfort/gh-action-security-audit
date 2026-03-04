@@ -36,7 +36,7 @@ This tool scans an org's workflows for these patterns and generates a report hig
 ## Requirements
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) authenticated as an **admin** of the target org
-- `bash` (4.0+), standard Unix tools (`grep`, `find`, `sort`, etc.)
+- `bash` (3.2+), standard Unix tools (`grep`, `find`, `sort`, etc.)
 - Admin scopes needed: `admin:org` (for org settings and secrets), repo admin access (for repo secrets)
 
 Verify your access:

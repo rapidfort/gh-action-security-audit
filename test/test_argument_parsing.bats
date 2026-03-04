@@ -47,6 +47,16 @@ setup() {
   assert_output --partial 'warn'
 }
 
+@test "workflow files are read once into a variable, not grepped repeatedly" {
+  # Each workflow should be read into wf_content once, not grepped 10 times
+  # Check that we use cat/read into variable, not direct grep on file for analysis
+  run grep -c 'wf_content' "$SCRIPT"
+  assert_success
+  # Should appear multiple times (read + multiple checks)
+  local count="${output}"
+  [ "$count" -ge 5 ]
+}
+
 @test "repo list uses while-read loop, not for-in word splitting" {
   # for repo in $all_repos is unsafe with spaces; must use while read
   run grep -n 'for repo in \$all_repos' "$SCRIPT"

@@ -301,51 +301,40 @@ for repo in "${REPOS[@]}"; do
 
   [ ${#wf_files[@]} -eq 0 ] && continue
 
-  # --- Permissions analysis ---
+  # --- Per-file analysis: read each file once ---
   total_wf=${#wf_files[@]}
   wf_with_perms=0
-  for f in "${wf_files[@]}"; do
-    if grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'permissions:'; then
-      wf_with_perms=$((wf_with_perms + 1))
-    fi
-  done
-
-  if [ "$wf_with_perms" -eq "$total_wf" ]; then
-    perms_cell="All ($total_wf/$total_wf)"
-    perms_csv="All ($total_wf/$total_wf)"
-  elif [ "$wf_with_perms" -eq 0 ]; then
-    perms_cell="**None** (0/$total_wf)"
-    perms_csv="None (0/$total_wf)"
-  else
-    perms_cell="Partial ($wf_with_perms/$total_wf)"
-    perms_csv="Partial ($wf_with_perms/$total_wf)"
-  fi
-
-  # --- pull_request_target ---
   prt_wfs=()
   prt_wfs_csv=()
-  for f in "${wf_files[@]}"; do
-    if grep -q 'pull_request_target' "$f" 2>/dev/null; then
-      wf_name=$(basename "$f")
-      detail=""
+  ic_wfs=()
+  ic_wfs_csv=()
 
-      # Sub-classify
+  for f in "${wf_files[@]}"; do
+    wf_name=$(basename "$f")
+    wf_content=$(cat "$f" 2>/dev/null) || continue
+    # Strip comment lines once for checks that need it
+    wf_uncommented=$(echo "$wf_content" | grep -v '^\s*#')
+
+    # --- Permissions ---
+    if echo "$wf_uncommented" | grep -q 'permissions:'; then
+      wf_with_perms=$((wf_with_perms + 1))
+    fi
+
+    # --- pull_request_target ---
+    if [[ $wf_content == *pull_request_target* ]]; then
       has_checkout=0
       has_fork_ref=0
       has_author_guard=0
       is_dependabot=0
 
-      grep -q 'actions/checkout' "$f" 2>/dev/null && has_checkout=1
-      grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' "$f" 2>/dev/null && has_fork_ref=1
-      grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" "$f" 2>/dev/null && is_dependabot=1
-      grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" "$f" 2>/dev/null && has_author_guard=1
-      grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'author_association' && has_author_guard=1
+      [[ $wf_content == *actions/checkout* ]] && has_checkout=1
+      echo "$wf_content" | grep -qE 'github\.head_ref|pull_request\.head\.(sha|ref|repo\.full_name)' && has_fork_ref=1
+      echo "$wf_content" | grep -qE "(user\.login|github\.actor)\s*==\s*['\"]dependabot" && is_dependabot=1
+      echo "$wf_content" | grep -qE "(user\.login|github\.actor)\s*==\s*['\"](dependabot|github-actions|renovate)" && has_author_guard=1
+      echo "$wf_uncommented" | grep -q 'author_association' && has_author_guard=1
 
-      # Tag Dependabot-gated workflows so reviewers can skip false positives
       dep_tag=""
-      if [ "$is_dependabot" = "1" ]; then
-        dep_tag=" (Dependabot)"
-      fi
+      [ "$is_dependabot" = "1" ] && dep_tag=" (Dependabot)"
 
       if [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "0" ]; then
         detail="$wf_name$dep_tag (**checkout+exec, no guard**)"
@@ -364,8 +353,35 @@ for repo in "${REPOS[@]}"; do
       prt_wfs+=("$detail")
       prt_wfs_csv+=("$detail_csv")
     fi
+
+    # --- issue_comment ---
+    if [[ $wf_content == *issue_comment* ]]; then
+      if echo "$wf_uncommented" | grep -q 'author_association'; then
+        ic_wfs+=("$wf_name (has author_association)")
+        ic_wfs_csv+=("$wf_name (has author_association)")
+      elif echo "$wf_content" | grep -qE "user\.login\s*==|actor\s*=="; then
+        ic_wfs+=("$wf_name (has actor check)")
+        ic_wfs_csv+=("$wf_name (has actor check)")
+      else
+        ic_wfs+=("$wf_name (**no author gate**)")
+        ic_wfs_csv+=("$wf_name (no author gate)")
+      fi
+    fi
   done
 
+  # --- Permissions cell ---
+  if [ "$wf_with_perms" -eq "$total_wf" ]; then
+    perms_cell="All ($total_wf/$total_wf)"
+    perms_csv="All ($total_wf/$total_wf)"
+  elif [ "$wf_with_perms" -eq 0 ]; then
+    perms_cell="**None** (0/$total_wf)"
+    perms_csv="None (0/$total_wf)"
+  else
+    perms_cell="Partial ($wf_with_perms/$total_wf)"
+    perms_csv="Partial ($wf_with_perms/$total_wf)"
+  fi
+
+  # --- PRT cell ---
   if [ ${#prt_wfs[@]} -eq 0 ]; then
     prt_cell="No"
     prt_csv="No"
@@ -378,25 +394,7 @@ for repo in "${REPOS[@]}"; do
     done
   fi
 
-  # --- issue_comment ---
-  ic_wfs=()
-  ic_wfs_csv=()
-  for f in "${wf_files[@]}"; do
-    if grep -q 'issue_comment' "$f" 2>/dev/null; then
-      wf_name=$(basename "$f")
-      if grep -v '^\s*#' "$f" 2>/dev/null | grep -q 'author_association'; then
-        ic_wfs+=("$wf_name (has author_association)")
-        ic_wfs_csv+=("$wf_name (has author_association)")
-      elif grep -qE "user\.login\s*==|actor\s*==" "$f" 2>/dev/null; then
-        ic_wfs+=("$wf_name (has actor check)")
-        ic_wfs_csv+=("$wf_name (has actor check)")
-      else
-        ic_wfs+=("$wf_name (**no author gate**)")
-        ic_wfs_csv+=("$wf_name (no author gate)")
-      fi
-    fi
-  done
-
+  # --- IC cell ---
   if [ ${#ic_wfs[@]} -eq 0 ]; then
     ic_cell="No"
     ic_csv="No"

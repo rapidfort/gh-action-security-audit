@@ -166,6 +166,18 @@ if ! gh auth status &>/dev/null; then
   exit 1
 fi
 
+# Detect portable base64 decode flag (GNU: -d, macOS: -D)
+if echo "dGVzdA==" | base64 --decode &>/dev/null; then
+  BASE64_DECODE=(base64 --decode)
+elif echo "dGVzdA==" | base64 -d &>/dev/null; then
+  BASE64_DECODE=(base64 -d)
+elif echo "dGVzdA==" | base64 -D &>/dev/null; then
+  BASE64_DECODE=(base64 -D)
+else
+  crit "No working base64 decode flag found."
+  exit 1
+fi
+
 AUTHED_USER=$(gh api user --jq '.login' 2>/dev/null || echo "unknown")
 info "Authenticated as: $AUTHED_USER"
 
@@ -213,7 +225,7 @@ else
     for wf in $wf_list; do
       content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || true)
       if [ -n "$content" ]; then
-        echo "$content" | base64 -d > "$repo_dir/$wf" 2>/dev/null || true
+        echo "$content" | "${BASE64_DECODE[@]}" > "$repo_dir/$wf" 2>/dev/null || true
         downloaded=$((downloaded + 1))
       fi
     done

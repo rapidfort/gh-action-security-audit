@@ -20,6 +20,17 @@ setup() {
   assert_output --partial 'mktemp -d'
 }
 
+@test "base64 decode uses portable detection, not hardcoded -d" {
+  # Stock macOS base64 uses -D or --decode, not -d (which is GNU-only).
+  # The script should detect the correct flag via BASE64_DECODE array.
+  # Verify: the actual decode call uses the variable, not a hardcoded flag.
+  run grep -n 'BASE64_DECODE' "$SCRIPT"
+  assert_success
+  # The pipe usage should reference the array, not a literal base64 -d
+  run grep 'echo.*| base64 -d' "$SCRIPT"
+  refute_output --partial '> "$repo_dir'
+}
+
 # --- Help flag ---
 
 @test "--help prints usage and exits 0" {

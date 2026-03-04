@@ -914,7 +914,7 @@ _run_hdf_wrapper() {
   run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
   assert_success
   assert_output --partial '"generator":'
-  assert_output --partial '"name": "gh-actions-audit"'
+  assert_output --partial '"name": "gh-action-security-audit"'
   rm -f "$repo_file"
 }
 

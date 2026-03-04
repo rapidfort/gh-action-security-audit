@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# gh-actions-audit.sh — GitHub Actions Security Audit Report
+# gh-action-security-audit — GitHub Actions Security Audit Report
 #
 # Scans a GitHub org's workflows for CI/CD security posture and generates
 # a report flagging configurations that warrant review, based on attack
@@ -14,7 +14,7 @@
 #   - Org-level secrets and their visibility (all repos, private, selected)
 #
 # Usage:
-#   ./gh-actions-audit.sh <ORG> [OPTIONS]
+#   gh action-security-audit <ORG> [OPTIONS]
 #
 # Arguments:
 #   ORG              GitHub organization name to audit (required)
@@ -43,6 +43,8 @@
 #   --exit-code      Exit with status 1 if critical or high findings are
 #                    detected. Useful for CI pipelines. Default: always exit 0.
 #
+#   -V, --version    Print version and exit.
+#
 #   -h, --help       Show this help message and exit.
 #
 # Authentication:
@@ -57,14 +59,14 @@
 #
 # Examples:
 #   # Full scan of an org (downloads all workflows, writes markdown):
-#   ./gh-actions-audit.sh my-org
+#   gh action-security-audit my-org
 #
 #   # Reuse a previous download, output both markdown and CSV:
-#   ./gh-actions-audit.sh my-org --local /tmp/gh-actions-audit-my-org-20260301 \
+#   gh action-security-audit my-org --local /tmp/gh-actions-audit-my-org-20260301 \
 #     --out my-org-audit.md --csv my-org-audit.csv
 #
 #   # Scan and write results to a specific directory:
-#   ./gh-actions-audit.sh my-org --out reports/my-org.md --csv reports/my-org.csv
+#   gh action-security-audit my-org --out reports/my-org.md --csv reports/my-org.csv
 
 set -euo pipefail
 
@@ -127,7 +129,7 @@ require_arg() {
   if [ -z "$next" ] || [[ "$next" == -* ]]; then
     echo "Error: $opt requires $desc." >&2
     echo "Usage: $0 <ORG> $opt $example" >&2
-    exit 1
+    exit 2
   fi
 }
 
@@ -169,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       EXIT_CODE=1
       shift
       ;;
+    -V | --version)
+      echo "gh-action-security-audit 0.1.0"
+      exit 0
+      ;;
     -h | --help)
       # Print comment block from line 2 until the first non-comment line
       awk 'NR==1{next} /^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
@@ -176,14 +182,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       echo "Unknown option: $1" >&2
-      exit 1
+      exit 2
       ;;
     *)
       if [ -z "$ORG" ]; then
         ORG="$1"
       else
         echo "Only one org at a time. Got '$1' after '$ORG'." >&2
-        exit 1
+        exit 2
       fi
       shift
       ;;
@@ -192,7 +198,7 @@ done
 
 if [ -z "$ORG" ]; then
   echo "Usage: $0 <ORG> [--local DIR] [--out FILE]" >&2
-  exit 1
+  exit 2
 fi
 
 if [ -n "$LOCAL_DIR" ] && [ "$CLEANUP" = "1" ]; then
@@ -202,7 +208,7 @@ fi
 
 if ! [[ $ORG =~ ^[a-zA-Z0-9_-]+$ ]]; then
   echo "Invalid org name: '$ORG'. GitHub org names may only contain [a-zA-Z0-9_-]." >&2
-  exit 1
+  exit 2
 fi
 
 # --- Configuration -----------------------------------------------------------
@@ -1775,7 +1781,7 @@ _emit_hdf_baseline() {
   local esc_id
   esc_id=$(json_escape "$target_id")
 
-  printf '{"name": "%s", "title": "GitHub Actions Security Audit", "version": "0.1.0", "summary": "Security findings for %s", "maintainer": "gh-actions-audit", "license": "MIT", "supports": [], "status": "loaded", "requirements": %s}' \
+  printf '{"name": "%s", "title": "GitHub Actions Security Audit", "version": "0.1.0", "summary": "Security findings for %s", "maintainer": "gh-action-security-audit", "license": "MIT", "supports": [], "status": "loaded", "requirements": %s}' \
     "$esc_id" "$esc_id" "$requirements"
 }
 
@@ -1838,7 +1844,7 @@ build_hdf_wrapper() {
   printf '], '
 
   # --- generator + timestamp ---
-  printf '"generator": {"name": "gh-actions-audit", "version": "0.1.0"}, '
+  printf '"generator": {"name": "gh-action-security-audit", "version": "0.1.0"}, '
   printf '"timestamp": "%s"}\n' "$timestamp"
 }
 

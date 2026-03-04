@@ -19,14 +19,14 @@ test-deps: ## Install bats-core, helpers, shellcheck, and shfmt (macOS: brew, Li
 	fi
 	@echo "Done. Run 'make check' to verify."
 
-lint: ## Run shellcheck on gh-actions-audit.sh
-	shellcheck gh-actions-audit.sh
+lint: ## Run shellcheck on gh-action-security-audit
+	shellcheck gh-action-security-audit
 
-fmt: ## Format gh-actions-audit.sh with shfmt (in place)
-	shfmt -w -i 2 -bn -ci gh-actions-audit.sh
+fmt: ## Format gh-action-security-audit with shfmt (in place)
+	shfmt -w -i 2 -bn -ci gh-action-security-audit
 
 fmt-check: ## Check formatting without modifying files
-	shfmt -d -i 2 -bn -ci gh-actions-audit.sh
+	shfmt -d -i 2 -bn -ci gh-action-security-audit
 
 test: ## Run all bats tests
 	@BATS_LIB_PATH="$${BATS_LIB_PATH:-$$(brew --prefix 2>/dev/null || echo /usr)/lib}" bats test/

@@ -50,7 +50,7 @@ bats_load_library bats-assert
 
 # --- Project paths ---
 PROJECT_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
-SCRIPT="${PROJECT_ROOT}/gh-actions-audit.sh"
+SCRIPT="${PROJECT_ROOT}/gh-action-security-audit"
 FIXTURES_DIR="${PROJECT_ROOT}/test/fixtures"
 
 # --- Mock helpers ---

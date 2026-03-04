@@ -20,6 +20,19 @@ setup() {
   assert_output --partial 'mktemp -d'
 }
 
+@test "script has trap EXIT for temp file cleanup" {
+  run grep -n 'trap.*EXIT' "$SCRIPT"
+  assert_success
+  assert_output --partial 'cleanup'
+}
+
+@test "cleanup function removes temp files" {
+  run grep -A5 'cleanup()' "$SCRIPT"
+  assert_success
+  assert_output --partial 'TABLE_ROWS'
+  assert_output --partial 'ORG_SECRETS_FILE'
+}
+
 @test "base64 decode uses portable detection, not hardcoded -d" {
   # Stock macOS base64 uses -D or --decode, not -d (which is GNU-only).
   # The script should detect the correct flag via BASE64_DECODE array.

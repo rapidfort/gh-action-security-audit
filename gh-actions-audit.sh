@@ -61,6 +61,13 @@
 
 set -euo pipefail
 
+# --- Cleanup on exit ---------------------------------------------------------
+
+cleanup() {
+  rm -f "${TABLE_ROWS:-}" "${TABLE_ROWS_CSV:-}" "${ORG_SECRETS_FILE:-}"
+}
+trap cleanup EXIT
+
 # --- Argument Parsing --------------------------------------------------------
 
 LOCAL_DIR=""
@@ -669,9 +676,7 @@ if [ -n "$CSV_FILE" ]; then
   info "CSV written to: $CSV_FILE"
 fi
 
-# --- Cleanup ---
-
-rm -f "$TABLE_ROWS" "$TABLE_ROWS_CSV" "$ORG_SECRETS_FILE"
+# --- Cleanup (temp files handled by trap EXIT) ---
 
 info "Report written to: $OUT_FILE"
 

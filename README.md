@@ -1,6 +1,21 @@
-# gh-actions-audit
+# gh-action-security-audit
 
-A security audit tool for GitHub Actions workflows across an entire GitHub organization.
+A security audit tool for GitHub Actions workflows across an entire GitHub organization. Distributed as a [`gh` CLI extension](https://docs.github.com/en/github-cli/github-cli/using-github-cli-extensions).
+
+## Installation
+
+### As a `gh` CLI extension (recommended)
+
+```bash
+gh extension install rapidfort/gh-action-security-audit
+gh action-security-audit <ORG>
+```
+
+### Standalone
+
+```bash
+./gh-action-security-audit <ORG>
+```
 
 ## Why this exists
 
@@ -68,7 +83,7 @@ gh api orgs/<YOUR_ORG>/actions/permissions
 ## Usage
 
 ```
-./gh-actions-audit.sh <ORG> [OPTIONS]
+gh action-security-audit <ORG> [OPTIONS]
 ```
 
 ### Options
@@ -77,24 +92,27 @@ gh api orgs/<YOUR_ORG>/actions/permissions
 |------|-------------|
 | `--out FILE` | Path for markdown report output. Default: `./<ORG>-actions-audit.md` |
 | `--csv FILE` | Path for CSV report output. Omit to skip CSV generation. |
-| `--local DIR` | Reuse previously downloaded workflow files instead of re-fetching from the API. Accepts the top-level audit directory or its `workflows/` subdirectory. |
+| `--hdf FILE` | Path for HDF v2 JSON report output (for MITRE Heimdall). |
+| `--local DIR` | Reuse previously downloaded workflow files instead of re-fetching from the API. |
 | `--cleanup` | Delete cached workflow files after the run completes. |
+| `--exit-code` | Exit with status 1 if critical or high findings are detected. |
+| `-V, --version` | Print version and exit. |
 | `-h, --help` | Show built-in help and exit. |
 
 ### Examples
 
 ```bash
 # Full scan — downloads all workflows, writes markdown report
-./gh-actions-audit.sh my-org
+gh action-security-audit my-org
 
 # Output both markdown and CSV
-./gh-actions-audit.sh my-org --out audit.md --csv audit.csv
+gh action-security-audit my-org --out audit.md --csv audit.csv
 
 # Reuse a previous download (saves time on large orgs)
-./gh-actions-audit.sh my-org --local /tmp/gh-actions-audit-my-org-20260301
+gh action-security-audit my-org --local /tmp/gh-actions-audit-my-org-20260301
 
 # Scan and clean up cached files afterward
-./gh-actions-audit.sh my-org --cleanup
+gh action-security-audit my-org --cleanup
 ```
 
 ### How it works
@@ -133,7 +151,7 @@ make fmt           # Auto-format with shfmt
 This project follows a TDD workflow. Before fixing a bug or adding a feature:
 
 1. Write a failing test in the appropriate `test/test_*.bats` file
-2. Make the change in `gh-actions-audit.sh`
+2. Make the change in `gh-action-security-audit`
 3. Verify with `make check`
 
 ## License

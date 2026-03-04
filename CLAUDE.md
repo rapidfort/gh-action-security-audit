@@ -22,32 +22,35 @@ A comprehensive GitHub Actions security scanner, distributed as a **`gh` CLI ext
 
 ## Project Overview
 
-A single-script security audit tool (`gh-actions-audit.sh`) that scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. Produces markdown, CSV, and (soon) JSONL reports with 12 detection checks across per-repo and org-level analysis. Runtime dependencies: `bash` (3.2+), `gh` CLI, and standard Unix tools. Future: packaged as a `gh` CLI extension.
+A single-script security audit tool (`gh-action-security-audit`) distributed as a `gh` CLI extension. Scans a GitHub organization's Actions workflows for CI/CD security misconfigurations. Produces markdown, CSV, and HDF v2 JSON reports with 29 detection checks across per-repo and org-level analysis. Runtime dependencies: `bash` (3.2+), `gh` CLI, and standard Unix tools. Installable via `gh extension install rapidfort/gh-action-security-audit`.
 
 ## Running the Script
 
 ```bash
-# Full scan (requires gh CLI authenticated as org admin)
-./gh-actions-audit.sh <ORG>
+# As a gh CLI extension (recommended)
+gh action-security-audit <ORG>
+
+# Or run directly
+./gh-action-security-audit <ORG>
 
 # With all options
-./gh-actions-audit.sh <ORG> --out report.md --csv report.csv --cleanup
+./gh-action-security-audit <ORG> --out report.md --csv report.csv --cleanup
 
 # Reuse previously downloaded workflows (skips API download phase)
-./gh-actions-audit.sh <ORG> --local /path/to/previous/audit/dir
+./gh-action-security-audit <ORG> --local /path/to/previous/audit/dir
 ```
 
 The script requires `admin:org` scope and repo admin access via `gh auth`.
 
 ## Architecture
 
-The entire tool is a single bash script (`gh-actions-audit.sh`, ~1000 lines) organized into five sequential phases:
+The entire tool is a single bash script (`gh-action-security-audit`, ~2300 lines) organized into five sequential phases:
 
 1. **Phase 1 (Download)** — Enumerates org repos via `gh repo list`, downloads `.github/workflows/*.yml` files via GitHub API. Skipped with `--local`.
 2. **Phase 2 (Per-repo analysis)** — `run_repo_classifiers()` scans each workflow file through 10 classify functions: `classify_prt()`, `classify_ic()`, `classify_unpinned()`, `classify_expr_injection()`, `classify_wfr()`, `classify_self_hosted()`, `classify_dangerous_perms()`, `classify_hardcoded_secrets()`, plus permissions and harden-runner checks. Results are cached, then `build_hdf_repo_target()` produces HDF v2 JSON (the single source of truth for pass/fail status), and `render_md_csv_row()` produces MD/CSV rows from HDF status + cached display strings. Trigger detection uses `extract_on_triggers()` to avoid false positives.
 3. **Phase 3 (Org secrets)** — Lists org-level secrets, maps each to repos via single-pass `SECRET_MAP_FILE`, generates `gh secret set` remediation commands.
 4. **Phase 4 (Org settings)** — Fetches default workflow token permissions, PR approval policy, allowed actions policy via `gh api --jq`.
-5. **Phase 5 (Report)** — Writes markdown report (and optional CSV) with 12-field per-repo table and summary statistics. Soon: JSONL intermediate format.
+5. **Phase 5 (Report)** — Writes markdown report (and optional CSV/HDF) with per-repo table and summary statistics.
 
 Key implementation details:
 - Workflow analysis is entirely grep-based heuristics (no YAML parser)

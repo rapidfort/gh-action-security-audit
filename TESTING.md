@@ -1,6 +1,6 @@
 # Testing Guide
 
-This project uses test-driven development (TDD) to refactor `gh-actions-audit.sh`. Tests are written first to document expected behavior (and existing bugs), then the script is updated to make them pass.
+This project uses test-driven development (TDD) to refactor `gh-action-security-audit`. Tests are written first to document expected behavior (and existing bugs), then the script is updated to make them pass.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ make test-deps
 
 ```bash
 make test          # Run all bats tests
-make lint          # Run shellcheck on gh-actions-audit.sh
+make lint          # Run shellcheck on gh-action-security-audit
 make fmt-check     # Check formatting (no changes)
 make fmt           # Auto-format with shfmt
 make check         # Run lint + format check + test (CI equivalent)
@@ -124,7 +124,7 @@ All tests must pass. Tests cover argument parsing, workflow analysis heuristics,
 
 The `.github/workflows/ci.yml` pipeline runs on every push and PR:
 
-- **ShellCheck** job: lints `gh-actions-audit.sh`
+- **ShellCheck** job: lints `gh-action-security-audit`
 - **shfmt** job: verifies formatting matches `shfmt -i 2 -bn -ci`
 - **Test** job: runs bats tests on ubuntu-latest and macos-latest via `bats-core/bats-action`
 

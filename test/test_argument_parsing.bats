@@ -240,6 +240,14 @@ _run_require_arg() {
   assert_output --partial "requires a filename"
 }
 
+# --- --hdf requires a filename ---
+
+@test "--hdf without argument exits 1" {
+  run bash "$SCRIPT" my-org --hdf
+  assert_failure
+  assert_output --partial "requires a filename"
+}
+
 # =============================================================================
 # Structural: robustness checks (ct5, i45, 1rx)
 # =============================================================================

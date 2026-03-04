@@ -33,6 +33,10 @@
 #                    (per-repo audit and org-level secrets) separated by a
 #                    blank row. Omit this flag to skip CSV generation.
 #
+#   --hdf FILE       Path for the HDF v2 JSON report output. This is the
+#                    structured format used by MITRE Heimdall and other
+#                    security tooling. Omit this flag to skip HDF generation.
+#
 #   --cleanup        Delete cached workflow files after the run completes.
 #                    By default the script keeps them for reuse with --local.
 #
@@ -64,7 +68,8 @@ set -euo pipefail
 # --- Cleanup on exit ---------------------------------------------------------
 
 cleanup() {
-  rm -f "${TABLE_ROWS_FILE:-}" "${TABLE_ROWS_CSV_FILE:-}" "${ORG_SECRETS_FILE:-}" "${SECRET_MAP_FILE:-}"
+  rm -f "${TABLE_ROWS_FILE:-}" "${TABLE_ROWS_CSV_FILE:-}" "${ORG_SECRETS_FILE:-}" "${SECRET_MAP_FILE:-}" \
+    "${HDF_REPO_TARGETS_FILE:-}" "${HDF_OUTPUT_FILE:-}" "${CLASSIFIER_CACHE_FILE:-}"
 }
 trap cleanup EXIT
 
@@ -127,6 +132,7 @@ LOCAL_DIR=""
 ORG=""
 OUT_FILE=""
 CSV_FILE=""
+HDF_FILE=""
 CLEANUP=0
 
 while [[ $# -gt 0 ]]; do
@@ -144,6 +150,11 @@ while [[ $# -gt 0 ]]; do
     --csv)
       require_arg "--csv" "${2:-}" "a filename" "report.csv"
       CSV_FILE="$2"
+      shift 2
+      ;;
+    --hdf)
+      require_arg "--hdf" "${2:-}" "a filename" "report.json"
+      HDF_FILE="$2"
       shift 2
       ;;
     --cleanup)
@@ -250,6 +261,7 @@ handle_cache_cleanup() {
 
   local reuse_cmd="$0 $ORG --local $AUDIT_DIR --out $OUT_FILE"
   [ -n "$CSV_FILE" ] && reuse_cmd+=" --csv $CSV_FILE"
+  [ -n "$HDF_FILE" ] && reuse_cmd+=" --hdf $HDF_FILE"
 
   if [ -t 0 ] && [ -t 1 ]; then
     printf "\nDelete cached workflow files? They can be reused with --local. [y/N]: "
@@ -648,15 +660,14 @@ classify_unpinned() {
   echo "${detail}|${detail_csv}"
 }
 
-# --- analyze_repo: analyze a single repo's workflow files ---
-# Writes pipe-delimited rows directly to md and csv temp files.
-# Args: repo repo_dir md_file csv_file
-# Globals: ORG, WORKFLOWS_DIR
-analyze_repo() {
-  local repo="$1"
-  local repo_dir="$2"
-  local md_file="$3"
-  local csv_file="$4"
+# --- run_repo_classifiers: run all 10 per-repo classifiers on a repo's workflows ---
+# Writes results to a cache file for consumption by analyze_repo and build_hdf_repo_target.
+# Args: repo_dir cache_file
+# Cache format: TAG|md_detail|csv_detail  or  META|key|value
+# Returns 1 if no workflow files found.
+run_repo_classifiers() {
+  local repo_dir="$1"
+  local cache_file="$2"
 
   local wf_files=()
   while IFS= read -r f; do
@@ -667,22 +678,6 @@ analyze_repo() {
 
   local total_wf=${#wf_files[@]}
   local wf_with_perms=0
-  local prt_wfs=()
-  local prt_wfs_csv=()
-  local ic_wfs=()
-  local ic_wfs_csv=()
-  local unpin_wfs=()
-  local unpin_wfs_csv=()
-  local expr_wfs=()
-  local expr_wfs_csv=()
-  local wfr_wfs=()
-  local wfr_wfs_csv=()
-  local sh_wfs=()
-  local sh_wfs_csv=()
-  local dp_wfs=()
-  local dp_wfs_csv=()
-  local hs_wfs=()
-  local hs_wfs_csv=()
   local has_harden_runner=0
 
   local f wf_name wf_content wf_uncommented wf_triggers
@@ -702,32 +697,28 @@ analyze_repo() {
     if [[ $wf_triggers == *pull_request_target* ]]; then
       local prt_result
       prt_result=$(classify_prt "$wf_name" "$wf_content" "$wf_uncommented")
-      prt_wfs+=("${prt_result%%|*}")
-      prt_wfs_csv+=("${prt_result#*|}")
+      echo "PRT|${prt_result}" >>"$cache_file"
     fi
 
     # --- issue_comment ---
     if [[ $wf_triggers == *issue_comment* ]]; then
       local ic_result
       ic_result=$(classify_ic "$wf_name" "$wf_content" "$wf_uncommented")
-      ic_wfs+=("${ic_result%%|*}")
-      ic_wfs_csv+=("${ic_result#*|}")
+      echo "IC|${ic_result}" >>"$cache_file"
     fi
 
     # --- Unpinned actions ---
     local unpin_result
     unpin_result=$(classify_unpinned "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$unpin_result" ]; then
-      unpin_wfs+=("${unpin_result%%|*}")
-      unpin_wfs_csv+=("${unpin_result#*|}")
+      echo "UNPIN|${unpin_result}" >>"$cache_file"
     fi
 
     # --- Expression injection ---
     local expr_result
     expr_result=$(classify_expr_injection "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$expr_result" ]; then
-      expr_wfs+=("${expr_result%%|*}")
-      expr_wfs_csv+=("${expr_result#*|}")
+      echo "EXPR|${expr_result}" >>"$cache_file"
     fi
 
     # --- workflow_run ---
@@ -735,8 +726,7 @@ analyze_repo() {
       local wfr_result
       wfr_result=$(classify_wfr "$wf_name" "$wf_content" "$wf_uncommented")
       if [ -n "$wfr_result" ]; then
-        wfr_wfs+=("${wfr_result%%|*}")
-        wfr_wfs_csv+=("${wfr_result#*|}")
+        echo "WFR|${wfr_result}" >>"$cache_file"
       fi
     fi
 
@@ -744,24 +734,21 @@ analyze_repo() {
     local sh_result
     sh_result=$(classify_self_hosted "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$sh_result" ]; then
-      sh_wfs+=("${sh_result%%|*}")
-      sh_wfs_csv+=("${sh_result#*|}")
+      echo "SH|${sh_result}" >>"$cache_file"
     fi
 
     # --- Dangerous permissions ---
     local dp_result
     dp_result=$(classify_dangerous_perms "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$dp_result" ]; then
-      dp_wfs+=("${dp_result%%|*}")
-      dp_wfs_csv+=("${dp_result#*|}")
+      echo "DP|${dp_result}" >>"$cache_file"
     fi
 
     # --- Hardcoded secrets ---
     local hs_result
     hs_result=$(classify_hardcoded_secrets "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$hs_result" ]; then
-      hs_wfs+=("${hs_result%%|*}")
-      hs_wfs_csv+=("${hs_result#*|}")
+      echo "HS|${hs_result}" >>"$cache_file"
     fi
 
     # --- Harden-runner ---
@@ -769,6 +756,81 @@ analyze_repo() {
       has_harden_runner=1
     fi
   done
+
+  # Write META lines
+  {
+    echo "META|total_wf|$total_wf"
+    echo "META|wf_with_perms|$wf_with_perms"
+    echo "META|has_harden_runner|$has_harden_runner"
+  } >>"$cache_file"
+}
+
+# --- analyze_repo: analyze a single repo's workflow files ---
+# Reads classifier results from a pre-built cache file and builds MD/CSV rows.
+# Args: repo repo_dir md_file csv_file cache_file
+# Globals: ORG, WORKFLOWS_DIR
+analyze_repo() {
+  local repo="$1"
+  local repo_dir="$2"
+  local md_file="$3"
+  local csv_file="$4"
+  local cache_file="$5"
+
+  # Read META values from cache
+  local total_wf wf_with_perms has_harden_runner
+  total_wf=$(awk -F'|' '$1 == "META" && $2 == "total_wf" {print $3}' "$cache_file")
+  wf_with_perms=$(awk -F'|' '$1 == "META" && $2 == "wf_with_perms" {print $3}' "$cache_file")
+  has_harden_runner=$(awk -F'|' '$1 == "META" && $2 == "has_harden_runner" {print $3}' "$cache_file")
+
+  [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
+
+  # Read classifier findings from cache into arrays
+  local prt_wfs=() prt_wfs_csv=()
+  local ic_wfs=() ic_wfs_csv=()
+  local unpin_wfs=() unpin_wfs_csv=()
+  local expr_wfs=() expr_wfs_csv=()
+  local wfr_wfs=() wfr_wfs_csv=()
+  local sh_wfs=() sh_wfs_csv=()
+  local dp_wfs=() dp_wfs_csv=()
+  local hs_wfs=() hs_wfs_csv=()
+
+  local tag md_detail csv_detail
+  while IFS='|' read -r tag md_detail csv_detail; do
+    case "$tag" in
+      PRT)
+        prt_wfs+=("$md_detail")
+        prt_wfs_csv+=("$csv_detail")
+        ;;
+      IC)
+        ic_wfs+=("$md_detail")
+        ic_wfs_csv+=("$csv_detail")
+        ;;
+      UNPIN)
+        unpin_wfs+=("$md_detail")
+        unpin_wfs_csv+=("$csv_detail")
+        ;;
+      EXPR)
+        expr_wfs+=("$md_detail")
+        expr_wfs_csv+=("$csv_detail")
+        ;;
+      WFR)
+        wfr_wfs+=("$md_detail")
+        wfr_wfs_csv+=("$csv_detail")
+        ;;
+      SH)
+        sh_wfs+=("$md_detail")
+        sh_wfs_csv+=("$csv_detail")
+        ;;
+      DP)
+        dp_wfs+=("$md_detail")
+        dp_wfs_csv+=("$csv_detail")
+        ;;
+      HS)
+        hs_wfs+=("$md_detail")
+        hs_wfs_csv+=("$csv_detail")
+        ;;
+    esac
+  done < <(grep -v '^META|' "$cache_file")
 
   # --- Build cells ---
   local perms_cell perms_csv
@@ -839,280 +901,239 @@ analyze_repo() {
   echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${hs_csv}|${hr_cell}|${secrets_cell}" >>"$csv_file"
 }
 
+# _hdf_result_*: per-check result functions for HDF output.
+# Each returns: status|codeDesc[|message]
+# These adapt existing classifier outputs into the standard 3-field format
+# used by the YAML-driven loop in build_hdf_repo_target/build_hdf_org_target.
+
+# GHA-001: Explicit permissions check
+# Args: $1=wf_with_perms $2=total_wf
+_hdf_result_GHA_001() {
+  local wf_with_perms="$1" total_wf="$2"
+  if [ "$wf_with_perms" -eq "$total_wf" ]; then
+    printf 'passed|All %s/%s workflows have permissions blocks' \
+      "$total_wf" "$total_wf"
+  else
+    printf 'failed|%s/%s workflows have permissions blocks|%s workflow(s) missing permissions: block' \
+      "$wf_with_perms" "$total_wf" "$((total_wf - wf_with_perms))"
+  fi
+}
+
+# GHA-002: pull_request_target
+# Args: findings as positional params (pass "${prt_findings[@]}")
+_hdf_result_GHA_002() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No pull_request_target with unchecked fork code found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|pull_request_target findings|%s' "$detail"
+  fi
+}
+
+# GHA-003: issue_comment
+_hdf_result_GHA_003() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No ungated issue_comment triggers found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|issue_comment findings|%s' "$detail"
+  fi
+}
+
+# GHA-004: Unpinned actions
+_hdf_result_GHA_004() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|All actions are SHA-pinned or no actions found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Unpinned action findings|%s' "$detail"
+  fi
+}
+
+# GHA-005: Expression injection
+_hdf_result_GHA_005() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No expression injection patterns found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Expression injection findings|%s' "$detail"
+  fi
+}
+
+# GHA-006: workflow_run
+_hdf_result_GHA_006() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No risky workflow_run patterns found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|workflow_run findings|%s' "$detail"
+  fi
+}
+
+# GHA-007: Self-hosted runners
+_hdf_result_GHA_007() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No self-hosted runner usage found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Self-hosted runner findings|%s' "$detail"
+  fi
+}
+
+# GHA-008: Dangerous permissions
+_hdf_result_GHA_008() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No excessive permissions found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Dangerous permissions findings|%s' "$detail"
+  fi
+}
+
+# GHA-009: Hardcoded secrets
+_hdf_result_GHA_009() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No hardcoded secrets found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Hardcoded secret findings|%s' "$detail"
+  fi
+}
+
+# GHA-010: Harden-runner
+# Args: $1=has_harden_runner (0 or 1)
+_hdf_result_GHA_010() {
+  if [ "$1" -eq 1 ]; then
+    printf 'passed|step-security/harden-runner detected'
+  else
+    printf 'failed|No step-security/harden-runner usage found|Consider adding harden-runner for supply chain attack detection'
+  fi
+}
+
+# GHA-011: Org default workflow permissions
+# Args: $1=default_wf_perm (e.g., "read" or "write")
+_hdf_result_GHA_011() {
+  if [ "$1" = "read" ]; then
+    printf 'passed|default_workflow_permissions is read'
+  else
+    printf 'failed|default_workflow_permissions is %s|Should be read, not %s' "$1" "$1"
+  fi
+}
+
+# GHA-012: Org PR approval policy
+# Args: $1=can_approve_prs ("true" or "false")
+_hdf_result_GHA_012() {
+  if [ "$1" = "false" ]; then
+    printf 'passed|can_approve_pull_request_reviews is false'
+  else
+    printf 'failed|can_approve_pull_request_reviews is %s|Workflows should not be able to approve PRs' "$1"
+  fi
+}
+
+# GHA-013: Org allowed actions policy
+# Args: $1=allowed_actions (e.g., "all", "selected", "verified")
+_hdf_result_GHA_013() {
+  if [ "$1" = "selected" ] || [ "$1" = "verified" ]; then
+    printf 'passed|allowed_actions is %s' "$1"
+  else
+    printf 'failed|allowed_actions is %s|Should be selected or verified, not %s' "$1" "$1"
+  fi
+}
+
+# GHA-029: Org secret scoping
+# Args: $1=org_secrets_file (pipe-delimited file from Phase 3)
+_hdf_result_GHA_029() {
+  local org_secrets_file="$1"
+  if [ ! -s "$org_secrets_file" ]; then
+    printf 'passed|No org secrets found or file empty'
+    return 0
+  fi
+  local all_vis_secrets
+  all_vis_secrets=$(awk -F'|' '$2 == "All repositories" {print $1}' "$org_secrets_file" | paste -sd', ' -)
+  if [ -z "$all_vis_secrets" ]; then
+    printf 'passed|All org secrets are scoped to selected or private repositories'
+  else
+    printf 'failed|Org secrets with visibility all: %s|Scope these secrets to selected repositories' "$all_vis_secrets"
+  fi
+}
+
 # build_hdf_repo_target: produce an HDF v2 target JSON object for a single repo.
-# Runs all classifiers and maps results to emit_hdf_requirement() calls.
-# Args: repo repo_dir
+# Reads classifier results from a pre-built cache file.
+# Args: repo repo_dir cache_file
 # Output: JSON object with targetId and requirements[] array to stdout.
 build_hdf_repo_target() {
   local repo="$1"
   local repo_dir="$2"
+  local cache_file="$3"
 
-  local wf_files=()
-  while IFS= read -r f; do
-    wf_files+=("$f")
-  done < <(find_workflow_files "$repo_dir")
+  # Read META values from cache
+  local total_wf wf_with_perms has_harden_runner
+  total_wf=$(awk -F'|' '$1 == "META" && $2 == "total_wf" {print $3}' "$cache_file")
+  wf_with_perms=$(awk -F'|' '$1 == "META" && $2 == "wf_with_perms" {print $3}' "$cache_file")
+  has_harden_runner=$(awk -F'|' '$1 == "META" && $2 == "has_harden_runner" {print $3}' "$cache_file")
 
-  [ ${#wf_files[@]} -eq 0 ] && return 1
+  [ -z "$total_wf" ] || [ "$total_wf" -eq 0 ] && return 1
 
-  local total_wf=${#wf_files[@]}
-  local wf_with_perms=0
-  local prt_findings=()
-  local ic_findings=()
-  local unpin_findings=()
-  local expr_findings=()
-  local wfr_findings=()
-  local sh_findings=()
-  local dp_findings=()
-  local hs_findings=()
-  local has_harden_runner=0
+  # Read classifier findings from cache (MD detail only, used for HDF codeDesc)
+  local prt_findings=() ic_findings=() unpin_findings=() expr_findings=()
+  local wfr_findings=() sh_findings=() dp_findings=() hs_findings=()
 
-  local f wf_name wf_content wf_uncommented wf_triggers
+  local tag md_detail csv_detail
+  while IFS='|' read -r tag md_detail csv_detail; do
+    case "$tag" in
+      PRT) prt_findings+=("$md_detail") ;;
+      IC) ic_findings+=("$md_detail") ;;
+      UNPIN) unpin_findings+=("$md_detail") ;;
+      EXPR) expr_findings+=("$md_detail") ;;
+      WFR) wfr_findings+=("$md_detail") ;;
+      SH) sh_findings+=("$md_detail") ;;
+      DP) dp_findings+=("$md_detail") ;;
+      HS) hs_findings+=("$md_detail") ;;
+    esac
+  done < <(grep -v '^META|' "$cache_file")
 
-  for f in "${wf_files[@]}"; do
-    wf_name=$(basename "$f")
-    wf_content=$(cat "$f" 2>/dev/null) || continue
-    wf_uncommented=$(grep -v '^\s*#' <<<"$wf_content")
-    wf_triggers=$(extract_on_triggers "$wf_uncommented")
-
-    # Permissions
-    if grep -q 'permissions:' <<<"$wf_uncommented"; then
-      wf_with_perms=$((wf_with_perms + 1))
-    fi
-
-    # pull_request_target
-    if [[ $wf_triggers == *pull_request_target* ]]; then
-      local prt_result
-      prt_result=$(classify_prt "$wf_name" "$wf_content" "$wf_uncommented")
-      prt_findings+=("${prt_result%%|*}")
-    fi
-
-    # issue_comment
-    if [[ $wf_triggers == *issue_comment* ]]; then
-      local ic_result
-      ic_result=$(classify_ic "$wf_name" "$wf_content" "$wf_uncommented")
-      ic_findings+=("${ic_result%%|*}")
-    fi
-
-    # Unpinned actions
-    local unpin_result
-    unpin_result=$(classify_unpinned "$wf_name" "$wf_content" "$wf_uncommented")
-    if [ -n "$unpin_result" ]; then
-      unpin_findings+=("${unpin_result%%|*}")
-    fi
-
-    # Expression injection
-    local expr_result
-    expr_result=$(classify_expr_injection "$wf_name" "$wf_content" "$wf_uncommented")
-    if [ -n "$expr_result" ]; then
-      expr_findings+=("${expr_result%%|*}")
-    fi
-
-    # workflow_run
-    if [[ $wf_triggers == *workflow_run* ]]; then
-      local wfr_result
-      wfr_result=$(classify_wfr "$wf_name" "$wf_content" "$wf_uncommented")
-      if [ -n "$wfr_result" ]; then
-        wfr_findings+=("${wfr_result%%|*}")
-      fi
-    fi
-
-    # Self-hosted runners
-    local sh_result
-    sh_result=$(classify_self_hosted "$wf_name" "$wf_content" "$wf_uncommented")
-    if [ -n "$sh_result" ]; then
-      sh_findings+=("${sh_result%%|*}")
-    fi
-
-    # Dangerous permissions
-    local dp_result
-    dp_result=$(classify_dangerous_perms "$wf_name" "$wf_content" "$wf_uncommented")
-    if [ -n "$dp_result" ]; then
-      dp_findings+=("${dp_result%%|*}")
-    fi
-
-    # Hardcoded secrets
-    local hs_result
-    hs_result=$(classify_hardcoded_secrets "$wf_name" "$wf_content" "$wf_uncommented")
-    if [ -n "$hs_result" ]; then
-      hs_findings+=("${hs_result%%|*}")
-    fi
-
-    # Harden-runner
-    if [[ $wf_uncommented == *step-security/harden-runner* ]]; then
-      has_harden_runner=1
-    fi
-  done
-
-  # --- Build requirements JSON array ---
+  # --- Build requirements JSON array via YAML-driven loop ---
   local reqs=()
-
-  # GHA-001: Permissions
-  if [ "$wf_with_perms" -eq "$total_wf" ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-001" \
-      "Workflows MUST use explicit permissions blocks" \
-      0.5 "medium" "passed" \
-      "All $total_wf/$total_wf workflows have permissions blocks")")
-  else
-    reqs+=("$(emit_hdf_requirement "GHA-001" \
-      "Workflows MUST use explicit permissions blocks" \
-      0.5 "medium" "failed" \
-      "$wf_with_perms/$total_wf workflows have permissions blocks" \
-      "$((total_wf - wf_with_perms)) workflow(s) missing permissions: block")")
-  fi
-
-  # GHA-002: pull_request_target
-  if [ ${#prt_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-002" \
-      "Workflows MUST NOT use pull_request_target with unchecked fork code" \
-      0.9 "critical" "passed" \
-      "No pull_request_target with unchecked fork code found")")
-  else
-    local prt_detail
-    prt_detail=$(printf '%s; ' "${prt_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-002" \
-      "Workflows MUST NOT use pull_request_target with unchecked fork code" \
-      0.9 "critical" "failed" \
-      "pull_request_target findings" \
-      "$prt_detail")")
-  fi
-
-  # GHA-003: issue_comment
-  if [ ${#ic_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-003" \
-      "Workflows using issue_comment MUST gate on author association" \
-      0.7 "high" "passed" \
-      "No ungated issue_comment triggers found")")
-  else
-    local ic_detail
-    ic_detail=$(printf '%s; ' "${ic_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-003" \
-      "Workflows using issue_comment MUST gate on author association" \
-      0.7 "high" "failed" \
-      "issue_comment findings" \
-      "$ic_detail")")
-  fi
-
-  # GHA-004: Unpinned actions
-  if [ ${#unpin_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-004" \
-      "Actions MUST be pinned to immutable SHA references" \
-      0.7 "high" "passed" \
-      "All actions are SHA-pinned or no actions found")")
-  else
-    local unpin_detail
-    unpin_detail=$(printf '%s; ' "${unpin_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-004" \
-      "Actions MUST be pinned to immutable SHA references" \
-      0.7 "high" "failed" \
-      "Unpinned action findings" \
-      "$unpin_detail")")
-  fi
-
-  # GHA-005: Expression injection
-  if [ ${#expr_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-005" \
-      "Workflows MUST NOT interpolate untrusted expressions in run blocks" \
-      0.9 "critical" "passed" \
-      "No expression injection patterns found")")
-  else
-    local expr_detail
-    expr_detail=$(printf '%s; ' "${expr_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-005" \
-      "Workflows MUST NOT interpolate untrusted expressions in run blocks" \
-      0.9 "critical" "failed" \
-      "Expression injection findings" \
-      "$expr_detail")")
-  fi
-
-  # GHA-006: workflow_run
-  if [ ${#wfr_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-006" \
-      "Workflows using workflow_run MUST validate artifact provenance" \
-      0.7 "high" "passed" \
-      "No risky workflow_run patterns found")")
-  else
-    local wfr_detail
-    wfr_detail=$(printf '%s; ' "${wfr_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-006" \
-      "Workflows using workflow_run MUST validate artifact provenance" \
-      0.7 "high" "failed" \
-      "workflow_run findings" \
-      "$wfr_detail")")
-  fi
-
-  # GHA-007: Self-hosted runners
-  if [ ${#sh_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-007" \
-      "Workflows SHOULD NOT use self-hosted runners for public repos" \
-      0.7 "high" "passed" \
-      "No self-hosted runner usage found")")
-  else
-    local sh_detail
-    sh_detail=$(printf '%s; ' "${sh_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-007" \
-      "Workflows SHOULD NOT use self-hosted runners for public repos" \
-      0.7 "high" "failed" \
-      "Self-hosted runner findings" \
-      "$sh_detail")")
-  fi
-
-  # GHA-008: Dangerous permissions
-  if [ ${#dp_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-008" \
-      "Workflows MUST NOT request excessive GITHUB_TOKEN permissions" \
-      0.5 "medium" "passed" \
-      "No excessive permissions found")")
-  else
-    local dp_detail
-    dp_detail=$(printf '%s; ' "${dp_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-008" \
-      "Workflows MUST NOT request excessive GITHUB_TOKEN permissions" \
-      0.5 "medium" "failed" \
-      "Dangerous permissions findings" \
-      "$dp_detail")")
-  fi
-
-  # GHA-009: Hardcoded secrets
-  if [ ${#hs_findings[@]} -eq 0 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-009" \
-      "Workflows MUST NOT contain hardcoded secrets" \
-      0.9 "critical" "passed" \
-      "No hardcoded secrets found")")
-  else
-    local hs_detail
-    hs_detail=$(printf '%s; ' "${hs_findings[@]}")
-    reqs+=("$(emit_hdf_requirement "GHA-009" \
-      "Workflows MUST NOT contain hardcoded secrets" \
-      0.9 "critical" "failed" \
-      "Hardcoded secret findings" \
-      "$hs_detail")")
-  fi
-
-  # GHA-010: Harden-runner
-  if [ "$has_harden_runner" -eq 1 ]; then
-    reqs+=("$(emit_hdf_requirement "GHA-010" \
-      "Repositories SHOULD use harden-runner for runtime monitoring" \
-      0.1 "informational" "passed" \
-      "step-security/harden-runner detected")")
-  else
-    reqs+=("$(emit_hdf_requirement "GHA-010" \
-      "Repositories SHOULD use harden-runner for runtime monitoring" \
-      0.1 "informational" "failed" \
-      "No step-security/harden-runner usage found" \
-      "Consider adding harden-runner for supply chain attack detection")")
-  fi
-
-  # --- Unimplemented per-repo requirements → notReviewed ---
-  # Parse requirements.yaml for entries with implemented: false and non-org classifiers.
-  # This ensures new requirements added to the YAML automatically appear in HDF output.
   local profile_yaml="${HDF_PROFILE_DIR:-${BASH_SOURCE[0]%/*}/hdf-profile}/requirements.yaml"
   if [ -f "$profile_yaml" ]; then
-    while IFS='|' read -r req_id req_title req_impact req_severity; do
+    local req_id req_title req_impact req_severity req_impl
+    local result status code_desc message
+    while IFS='|' read -r req_id req_title req_impact req_severity req_impl; do
       [ -z "$req_id" ] && continue
-      reqs+=("$(emit_hdf_requirement "$req_id" \
-        "$req_title" \
-        "$req_impact" "$req_severity" "notReviewed" \
-        "Detection not yet implemented")")
+      if [ "$req_impl" = "true" ]; then
+        # Dispatch to the matching _hdf_result_GHA_XXX function
+        case "$req_id" in
+          GHA-001) result=$(_hdf_result_GHA_001 "$wf_with_perms" "$total_wf") ;;
+          GHA-002) result=$(_hdf_result_GHA_002 "${prt_findings[@]}") ;;
+          GHA-003) result=$(_hdf_result_GHA_003 "${ic_findings[@]}") ;;
+          GHA-004) result=$(_hdf_result_GHA_004 "${unpin_findings[@]}") ;;
+          GHA-005) result=$(_hdf_result_GHA_005 "${expr_findings[@]}") ;;
+          GHA-006) result=$(_hdf_result_GHA_006 "${wfr_findings[@]}") ;;
+          GHA-007) result=$(_hdf_result_GHA_007 "${sh_findings[@]}") ;;
+          GHA-008) result=$(_hdf_result_GHA_008 "${dp_findings[@]}") ;;
+          GHA-009) result=$(_hdf_result_GHA_009 "${hs_findings[@]}") ;;
+          GHA-010) result=$(_hdf_result_GHA_010 "$has_harden_runner") ;;
+          *) result="notReviewed|Detection not yet implemented" ;;
+        esac
+        IFS='|' read -r status code_desc message <<<"$result"
+        reqs+=("$(emit_hdf_requirement "$req_id" \
+          "$req_title" \
+          "$req_impact" "$req_severity" "$status" "$code_desc" "$message")")
+      else
+        # Unimplemented → notReviewed
+        reqs+=("$(emit_hdf_requirement "$req_id" \
+          "$req_title" \
+          "$req_impact" "$req_severity" "notReviewed" \
+          "Detection not yet implemented")")
+      fi
     done < <(
       awk '
       /^- id:/ { id=$3 }
@@ -1121,8 +1142,9 @@ build_hdf_repo_target() {
       /^  severity:/ { severity=$2 }
       /^  classifier:/ { classifier=$2 }
       /^  implemented:/ {
-        if ($2 == "false" && index(classifier, "org_") != 1) {
-          printf "%s|%s|%s|%s\n", id, title, impact, severity
+        impl=$2
+        if (index(classifier, "org_") != 1) {
+          printf "%s|%s|%s|%s|%s\n", id, title, impact, severity, impl
         }
       }' "$profile_yaml"
     )
@@ -1142,15 +1164,177 @@ build_hdf_repo_target() {
   printf ']}\n'
 }
 
+# build_hdf_org_target: produce an HDF v2 target JSON object for org-level checks.
+# Uses the same YAML-driven loop as build_hdf_repo_target, filtered for org_ classifiers.
+# Args: org default_wf_perm can_approve_prs allowed_actions [org_secrets_file]
+# Output: JSON object with targetId and requirements[] array to stdout.
+build_hdf_org_target() {
+  local org="$1"
+  local default_wf_perm="$2"
+  local can_approve_prs="$3"
+  local allowed_actions="$4"
+  local org_secrets_file="${5:-}"
+
+  local reqs=()
+  local profile_yaml="${HDF_PROFILE_DIR:-${BASH_SOURCE[0]%/*}/hdf-profile}/requirements.yaml"
+  if [ -f "$profile_yaml" ]; then
+    local req_id req_title req_impact req_severity req_impl
+    local result status code_desc message
+    while IFS='|' read -r req_id req_title req_impact req_severity req_impl; do
+      [ -z "$req_id" ] && continue
+      if [ "$req_impl" = "true" ]; then
+        case "$req_id" in
+          GHA-011) result=$(_hdf_result_GHA_011 "$default_wf_perm") ;;
+          GHA-012) result=$(_hdf_result_GHA_012 "$can_approve_prs") ;;
+          GHA-013) result=$(_hdf_result_GHA_013 "$allowed_actions") ;;
+          GHA-029) result=$(_hdf_result_GHA_029 "$org_secrets_file") ;;
+          *) result="notReviewed|Detection not yet implemented" ;;
+        esac
+        IFS='|' read -r status code_desc message <<<"$result"
+        reqs+=("$(emit_hdf_requirement "$req_id" \
+          "$req_title" \
+          "$req_impact" "$req_severity" "$status" "$code_desc" "$message")")
+      else
+        reqs+=("$(emit_hdf_requirement "$req_id" \
+          "$req_title" \
+          "$req_impact" "$req_severity" "notReviewed" \
+          "Detection not yet implemented")")
+      fi
+    done < <(
+      awk '
+      /^- id:/ { id=$3 }
+      /^  title:/ { gsub(/^  title: "?/, ""); gsub(/"$/, ""); title=$0 }
+      /^  impact:/ { impact=$2 }
+      /^  severity:/ { severity=$2 }
+      /^  classifier:/ { classifier=$2 }
+      /^  implemented:/ {
+        impl=$2
+        if (index(classifier, "org_") == 1) {
+          printf "%s|%s|%s|%s|%s\n", id, title, impact, severity, impl
+        }
+      }' "$profile_yaml"
+    )
+  fi
+
+  # --- Assemble target JSON ---
+  local esc_org
+  esc_org=$(json_escape "$org")
+  printf '{"targetId": "%s", "requirements": [' "$esc_org"
+  local i
+  for i in "${!reqs[@]}"; do
+    if [ "$i" -gt 0 ]; then
+      printf ', '
+    fi
+    printf '%s' "${reqs[$i]}"
+  done
+  printf ']}\n'
+}
+
+# _emit_hdf_baseline: wrap a target JSON object in HDF v2 Evaluated_Baseline metadata.
+# Args: target_json (JSON string with targetId and requirements fields)
+# Output: one Evaluated_Baseline JSON object to stdout.
+_emit_hdf_baseline() {
+  local target_json="$1"
+
+  # Extract targetId — simple parameter expansion (no jq)
+  local target_id
+  target_id="${target_json#*\"targetId\": \"}"
+  target_id="${target_id%%\"*}"
+
+  # Extract requirements array — everything between first [ and last ]
+  local requirements
+  requirements="${target_json#*\"requirements\": }"
+  requirements="${requirements%\}}"
+  # Trim trailing whitespace/newlines
+  requirements="${requirements%"${requirements##*[![:space:]]}"}"
+
+  local esc_id
+  esc_id=$(json_escape "$target_id")
+
+  printf '{"name": "%s", "title": "GitHub Actions Security Audit", "version": "0.1.0", "summary": "Security findings for %s", "maintainer": "gh-actions-audit", "license": "MIT", "supports": [], "status": "loaded", "requirements": %s}' \
+    "$esc_id" "$esc_id" "$requirements"
+}
+
+# build_hdf_wrapper: assemble a complete HDF v2 document from target JSON objects.
+# Args: org repo_targets_file org_target_json
+#   org: organization name
+#   repo_targets_file: temp file with one build_hdf_repo_target JSON object per line
+#   org_target_json: single JSON string from build_hdf_org_target
+# Output: complete HDF v2 JSON document to stdout.
+build_hdf_wrapper() {
+  local org="$1"
+  local repo_targets_file="$2"
+  local org_target_json="$3"
+
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # --- baselines ---
+  printf '{"baselines": ['
+  local first=1
+  local line
+  # Read repo targets (one JSON per line, skip empty lines)
+  if [ -s "$repo_targets_file" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      if [ "$first" -eq 0 ]; then
+        printf ', '
+      fi
+      _emit_hdf_baseline "$line"
+      first=0
+    done <"$repo_targets_file"
+  fi
+  # Org baseline
+  if [ -n "$org_target_json" ]; then
+    if [ "$first" -eq 0 ]; then
+      printf ', '
+    fi
+    _emit_hdf_baseline "$org_target_json"
+  fi
+  printf '], '
+
+  # --- targets ---
+  printf '"targets": ['
+  first=1
+  if [ -s "$repo_targets_file" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      local target_id
+      target_id="${line#*\"targetId\": \"}"
+      target_id="${target_id%%\"*}"
+      if [ "$first" -eq 0 ]; then
+        printf ', '
+      fi
+      local esc_name
+      esc_name=$(json_escape "$org/$target_id")
+      printf '{"type": "repository", "name": "%s"}' "$esc_name"
+      first=0
+    done <"$repo_targets_file"
+  fi
+  printf '], '
+
+  # --- generator + timestamp ---
+  printf '"generator": {"name": "gh-actions-audit", "version": "0.1.0"}, '
+  printf '"timestamp": "%s"}\n' "$timestamp"
+}
+
 # Temp files to accumulate table rows
 TABLE_ROWS_FILE=$(mktemp)
 TABLE_ROWS_CSV_FILE=$(mktemp)
+HDF_REPO_TARGETS_FILE=$(mktemp)
+HDF_OUTPUT_FILE=$(mktemp)
+
+CLASSIFIER_CACHE_FILE=$(mktemp)
 
 for repo in "${REPOS[@]}"; do
   repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
   [ -d "$repo_dir" ] || continue
 
-  analyze_repo "$repo" "$repo_dir" "$TABLE_ROWS_FILE" "$TABLE_ROWS_CSV_FILE" || continue
+  : >"$CLASSIFIER_CACHE_FILE"
+  run_repo_classifiers "$repo_dir" "$CLASSIFIER_CACHE_FILE" || continue
+
+  analyze_repo "$repo" "$repo_dir" "$TABLE_ROWS_FILE" "$TABLE_ROWS_CSV_FILE" "$CLASSIFIER_CACHE_FILE"
+  build_hdf_repo_target "$repo" "$repo_dir" "$CLASSIFIER_CACHE_FILE" >>"$HDF_REPO_TARGETS_FILE" || true
   progress "$repo"
 done
 
@@ -1254,6 +1438,15 @@ allowed_actions=$(gh api "orgs/$ORG/actions/permissions" --jq '.allowed_actions 
   warn "Could not fetch org actions permissions (check admin:org scope)."
   allowed_actions="unknown"
 }
+
+# --- Build HDF v2 document ---
+HDF_ORG_TARGET_JSON=$(build_hdf_org_target "$ORG" "$default_wf_perm" "$can_approve_prs" "$allowed_actions" "$ORG_SECRETS_FILE")
+build_hdf_wrapper "$ORG" "$HDF_REPO_TARGETS_FILE" "$HDF_ORG_TARGET_JSON" >"$HDF_OUTPUT_FILE"
+
+if [ -n "$HDF_FILE" ]; then
+  cp "$HDF_OUTPUT_FILE" "$HDF_FILE"
+  info "HDF v2 report written to $HDF_FILE"
+fi
 
 # =============================================================================
 # PHASE 5: Write the report

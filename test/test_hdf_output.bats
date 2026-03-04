@@ -204,21 +204,37 @@ PREAMBLE
   sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_002()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_003()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_004()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_005()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_006()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_007()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_008()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_009()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_010()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_011()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_012()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_013()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
 }
 
 _run_hdf_repo_target() {
   local repo="$1"
   local repo_dir="$2"
-  local tmpscript
+  local tmpscript cache_file
   tmpscript=$(mktemp)
+  cache_file=$(mktemp)
   {
     _hdf_preamble
-    echo "build_hdf_repo_target '$repo' '$repo_dir'"
+    echo "run_repo_classifiers '$repo_dir' '$cache_file' || exit 1"
+    echo "build_hdf_repo_target '$repo' '$repo_dir' '$cache_file'"
   } >"$tmpscript"
   local rc=0
   bash "$tmpscript" || rc=$?
-  rm -f "$tmpscript"
+  rm -f "$tmpscript" "$cache_file"
   return $rc
 }
 
@@ -471,10 +487,442 @@ _run_hdf_repo_target() {
 
   run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
-  # GHA-011 through GHA-013 and GHA-027/028 are org-level — must NOT appear
+  # GHA-011 through GHA-013, GHA-027/028/029 are org-level — must NOT appear
   refute_output --partial '"GHA-011"'
   refute_output --partial '"GHA-012"'
   refute_output --partial '"GHA-013"'
   refute_output --partial '"GHA-027"'
   refute_output --partial '"GHA-028"'
+  refute_output --partial '"GHA-029"'
+}
+
+# =============================================================================
+# build_hdf_org_target() tests
+# =============================================================================
+
+_hdf_org_preamble() {
+  cat <<PREAMBLE
+    CYAN='' YELLOW='' RED='' GREEN='' DIM='' RESET=''
+    warn() { printf '[WARN] %s\n' "\$*" >&2; }
+    HDF_PROFILE_DIR='${PROJECT_ROOT}/hdf-profile'
+PREAMBLE
+  sed -n '/^json_escape()/,/^}/p' "$SCRIPT"
+  sed -n '/^emit_hdf_requirement()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_011()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_012()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_013()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_029()/,/^}/p' "$SCRIPT"
+  sed -n '/^build_hdf_org_target()/,/^}/p' "$SCRIPT"
+}
+
+_run_hdf_org_target() {
+  local org="$1" default_perm="$2" can_approve="$3" allowed="$4"
+  local org_secrets_file="${5:-}"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _hdf_org_preamble
+    echo "build_hdf_org_target '$org' '$default_perm' '$can_approve' '$allowed' '$org_secrets_file'"
+  } >"$tmpscript"
+  local rc=0
+  bash "$tmpscript" || rc=$?
+  rm -f "$tmpscript"
+  return $rc
+}
+
+# --- Basic structure ---
+
+@test "build_hdf_org_target: returns valid JSON with targetId" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  assert_output --partial '"targetId": "test-org"'
+  assert_output --partial '"requirements": ['
+}
+
+# --- GHA-011: Default workflow permissions ---
+
+@test "build_hdf_org_target: GHA-011 passed when default_workflow_permissions is read" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  assert_output --partial '"GHA-011"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-011 failed when default_workflow_permissions is write" {
+  run _run_hdf_org_target "test-org" "write" "false" "selected"
+  assert_success
+  assert_output --partial '"GHA-011"'
+  assert_output --partial '"failed"'
+  assert_output --partial "default_workflow_permissions is write"
+}
+
+# --- GHA-012: PR approval policy ---
+
+@test "build_hdf_org_target: GHA-012 passed when can_approve_prs is false" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  assert_output --partial '"GHA-012"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-012 failed when can_approve_prs is true" {
+  run _run_hdf_org_target "test-org" "read" "true" "selected"
+  assert_success
+  assert_output --partial '"GHA-012"'
+  assert_output --partial '"failed"'
+  assert_output --partial "can_approve_pull_request_reviews is true"
+}
+
+# --- GHA-013: Allowed actions ---
+
+@test "build_hdf_org_target: GHA-013 passed when allowed_actions is selected" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  assert_output --partial '"GHA-013"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-013 passed when allowed_actions is verified" {
+  run _run_hdf_org_target "test-org" "read" "false" "verified"
+  assert_success
+  assert_output --partial '"GHA-013"'
+  assert_output --partial '"passed"'
+}
+
+@test "build_hdf_org_target: GHA-013 failed when allowed_actions is all" {
+  run _run_hdf_org_target "test-org" "read" "false" "all"
+  assert_success
+  assert_output --partial '"GHA-013"'
+  assert_output --partial '"failed"'
+  assert_output --partial "allowed_actions is all"
+}
+
+# --- GHA-029: Org secret scoping ---
+
+@test "build_hdf_org_target: GHA-029 passed when no secrets have visibility all" {
+  local secrets_file
+  secrets_file=$(mktemp)
+  echo "MY_SECRET|Selected|repo-a,repo-b|repo-a|" >"$secrets_file"
+  echo "OTHER_SECRET|Private repositories only|(all private)|repo-c|" >>"$secrets_file"
+
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file"
+  assert_success
+  assert_output --partial '"GHA-029"'
+  assert_output --partial '"passed"'
+  rm -f "$secrets_file"
+}
+
+@test "build_hdf_org_target: GHA-029 failed when secret has visibility all" {
+  local secrets_file
+  secrets_file=$(mktemp)
+  echo "BAD_SECRET|All repositories|(all)|repo-a|gh secret set BAD_SECRET --org test-org --visibility selected --repos repo-a" >"$secrets_file"
+  echo "GOOD_SECRET|Selected|repo-b|repo-b|" >>"$secrets_file"
+
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file"
+  assert_success
+  assert_output --partial '"GHA-029"'
+  assert_output --partial '"failed"'
+  assert_output --partial "BAD_SECRET"
+  rm -f "$secrets_file"
+}
+
+@test "build_hdf_org_target: GHA-029 passed when org secrets file is empty" {
+  local secrets_file
+  secrets_file=$(mktemp)
+  # Empty file — no secrets at all
+
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file"
+  assert_success
+  assert_output --partial '"GHA-029"'
+  assert_output --partial '"passed"'
+  rm -f "$secrets_file"
+}
+
+# --- All org requirement IDs present ---
+
+@test "build_hdf_org_target: all 6 org-level requirement IDs present" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  # 4 implemented org checks
+  assert_output --partial '"GHA-011"'
+  assert_output --partial '"GHA-012"'
+  assert_output --partial '"GHA-013"'
+  assert_output --partial '"GHA-029"'
+  # 2 unimplemented org checks
+  assert_output --partial '"GHA-027"'
+  assert_output --partial '"GHA-028"'
+}
+
+@test "build_hdf_org_target: unimplemented org requirements have notReviewed status" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  assert_output --partial '"notReviewed"'
+  assert_output --partial "Detection not yet implemented"
+}
+
+@test "build_hdf_org_target: per-repo requirement IDs NOT included" {
+  run _run_hdf_org_target "test-org" "read" "false" "selected"
+  assert_success
+  # Per-repo IDs must NOT appear in org target
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010; do
+    refute_output --partial "\"$id\""
+  done
+}
+
+# --- Combined pass/fail scenarios ---
+
+@test "build_hdf_org_target: all four implemented checks fail" {
+  local secrets_file
+  secrets_file=$(mktemp)
+  echo "LEAK|All repositories|(all)|repo-a|gh secret set LEAK" >"$secrets_file"
+  run _run_hdf_org_target "test-org" "write" "true" "all" "$secrets_file"
+  assert_success
+  # Count failed occurrences — should be at least 4 (011, 012, 013, 029)
+  local fail_count
+  fail_count=$(echo "$output" | grep -o '"failed"' | wc -l | tr -d ' ')
+  [ "$fail_count" -ge 4 ]
+  rm -f "$secrets_file"
+}
+
+@test "build_hdf_org_target: all four implemented checks pass" {
+  local secrets_file
+  secrets_file=$(mktemp)
+  echo "GOOD|Selected|repo-a|repo-a|" >"$secrets_file"
+  run _run_hdf_org_target "test-org" "read" "false" "selected" "$secrets_file"
+  assert_success
+  # All 4 implemented checks should pass (011, 012, 013, 029)
+  local pass_count
+  pass_count=$(echo "$output" | grep -o '"passed"' | wc -l | tr -d ' ')
+  [ "$pass_count" -ge 4 ]
+  rm -f "$secrets_file"
+}
+
+# =============================================================================
+# build_hdf_wrapper() tests
+# =============================================================================
+
+# Helper: extract build_hdf_wrapper and its dependencies
+_hdf_wrapper_preamble() {
+  cat <<PREAMBLE
+    CYAN='' YELLOW='' RED='' GREEN='' DIM='' RESET=''
+    warn() { printf '[WARN] %s\n' "\$*" >&2; }
+    HDF_PROFILE_DIR='${PROJECT_ROOT}/hdf-profile'
+PREAMBLE
+  sed -n '/^json_escape()/,/^}/p' "$SCRIPT"
+  sed -n '/^emit_hdf_requirement()/,/^}/p' "$SCRIPT"
+  sed -n '/^_emit_hdf_baseline()/,/^}/p' "$SCRIPT"
+  sed -n '/^build_hdf_wrapper()/,/^}/p' "$SCRIPT"
+}
+
+# Helper: create mock target JSON for testing
+# Each target has targetId and a requirements array with one dummy requirement
+_mock_repo_target() {
+  local repo="$1"
+  printf '{"targetId": "%s", "requirements": [{"id": "GHA-001", "title": "Test", "impact": 0.5, "severity": "medium", "results": [{"status": "passed", "codeDesc": "ok"}]}]}\n' "$repo"
+}
+
+_mock_org_target() {
+  local org="$1"
+  printf '{"targetId": "%s", "requirements": [{"id": "GHA-011", "title": "OrgTest", "impact": 0.7, "severity": "high", "results": [{"status": "passed", "codeDesc": "ok"}]}]}\n' "$org"
+}
+
+_run_hdf_wrapper() {
+  local org="$1"
+  shift
+  local repo_targets_file="$1"
+  shift
+  local org_target_json="$1"
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _hdf_wrapper_preamble
+    echo "build_hdf_wrapper '$org' '$repo_targets_file' '$org_target_json'"
+  } >"$tmpscript"
+  local rc=0
+  bash "$tmpscript" || rc=$?
+  rm -f "$tmpscript"
+  return $rc
+}
+
+# --- Basic structure ---
+
+@test "build_hdf_wrapper: returns valid JSON" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  echo "$output" | python3 -m json.tool >/dev/null 2>&1
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: has baselines array" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  assert_output --partial '"baselines":'
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: has generator object" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  assert_output --partial '"generator":'
+  assert_output --partial '"name": "gh-actions-audit"'
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: has timestamp in ISO-8601 format" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  assert_output --partial '"timestamp":'
+  # Match ISO-8601 pattern: YYYY-MM-DDTHH:MM:SSZ
+  [[ "$output" =~ [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ]]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: baseline count matches targets (N repos + 1 org)" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >>"$repo_file"
+  _mock_repo_target "repo-b" >>"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # 2 repos + 1 org = 3 baselines
+  local baseline_count
+  baseline_count=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['baselines']))")
+  [ "$baseline_count" -eq 3 ]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: repo baseline has requirements" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # First baseline should have requirements array with GHA-001
+  local has_req
+  has_req=$(echo "$output" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+bl = d['baselines'][0]
+print(any(r['id'] == 'GHA-001' for r in bl['requirements']))
+")
+  [ "$has_req" = "True" ]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: org baseline has requirements" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # Last baseline should have org requirement GHA-011
+  local has_req
+  has_req=$(echo "$output" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+bl = d['baselines'][-1]
+print(any(r['id'] == 'GHA-011' for r in bl['requirements']))
+")
+  [ "$has_req" = "True" ]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: baselines have profile metadata" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # Each baseline should have name, version, status
+  local ok
+  ok=$(echo "$output" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for bl in d['baselines']:
+  assert 'name' in bl, 'missing name'
+  assert 'version' in bl, 'missing version'
+  assert 'status' in bl, 'missing status'
+print('ok')
+")
+  [ "$ok" = "ok" ]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: targets array has repository entries" {
+  local repo_file
+  repo_file=$(mktemp)
+  _mock_repo_target "repo-a" >>"$repo_file"
+  _mock_repo_target "repo-b" >>"$repo_file"
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # targets[] should have type=repository entries for each repo
+  local target_info
+  target_info=$(echo "$output" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+targets = d['targets']
+print(len(targets), targets[0]['type'], targets[0]['name'])
+")
+  [[ "$target_info" == *"repository"* ]]
+  [[ "$target_info" == *"test-org/repo-a"* ]]
+  rm -f "$repo_file"
+}
+
+@test "build_hdf_wrapper: empty repo list produces org-only output" {
+  local repo_file
+  repo_file=$(mktemp)
+  # Empty file — no repo targets
+  local org_json
+  org_json=$(_mock_org_target "test-org")
+
+  run _run_hdf_wrapper "test-org" "$repo_file" "$org_json"
+  assert_success
+  # Should have exactly 1 baseline (org only)
+  local baseline_count
+  baseline_count=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['baselines']))")
+  [ "$baseline_count" -eq 1 ]
+  # targets[] should be empty
+  local target_count
+  target_count=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['targets']))")
+  [ "$target_count" -eq 0 ]
+  rm -f "$repo_file"
 }

@@ -257,7 +257,7 @@ _script_preamble() {
     gh() { echo ''; return 0; }
     export -f gh
 PREAMBLE
-  # Extract helper and classify functions plus analyze_repo
+  # Extract helper and classify functions plus run_repo_classifiers and analyze_repo
   sed -n '/^extract_on_triggers()/,/^}/p' "$SCRIPT"
   sed -n '/^find_workflow_files()/,/^}/p' "$SCRIPT"
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
@@ -269,20 +269,23 @@ PREAMBLE
   sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
   sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
 }
 
 _run_analyze_repo() {
   local repo="$1"
   local repo_dir="$2"
-  local md_file csv_file
+  local md_file csv_file cache_file
   md_file=$(mktemp)
   csv_file=$(mktemp)
+  cache_file=$(mktemp)
   bash -c "
     $(_script_preamble)
     ORG='test-org'
     WORKFLOWS_DIR='$BATS_TEST_WORKFLOW_DIR'
-    analyze_repo '$repo' '$repo_dir' '$md_file' '$csv_file'
+    run_repo_classifiers '$repo_dir' '$cache_file' || exit 1
+    analyze_repo '$repo' '$repo_dir' '$md_file' '$csv_file' '$cache_file'
   "
   local rc=$?
   # Output md row then csv row (same format tests expect)
@@ -290,7 +293,7 @@ _run_analyze_repo() {
     cat "$md_file"
     cat "$csv_file"
   fi
-  rm -f "$md_file" "$csv_file"
+  rm -f "$md_file" "$csv_file" "$cache_file"
   return $rc
 }
 
@@ -1037,6 +1040,72 @@ YAML
   run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_output --partial "API-only"
+}
+
+# =============================================================================
+# run_repo_classifiers() unit tests
+# =============================================================================
+
+_run_repo_classifiers() {
+  local repo_dir="$1"
+  local cache_file
+  cache_file=$(mktemp)
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    _script_preamble
+    echo "run_repo_classifiers '$repo_dir' '$cache_file' || exit 1"
+    echo "cat '$cache_file'"
+  } >"$tmpscript"
+  local rc=0
+  bash "$tmpscript" || rc=$?
+  rm -f "$tmpscript" "$cache_file"
+  return $rc
+}
+
+@test "run_repo_classifiers: writes META lines" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "META|total_wf|1"
+  assert_output --partial "META|wf_with_perms|"
+  assert_output --partial "META|has_harden_runner|"
+}
+
+@test "run_repo_classifiers: PRT finding for prt workflow" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/prt-checkout-no-guard.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "PRT|"
+  assert_output --partial "checkout+exec, no guard"
+}
+
+@test "run_repo_classifiers: empty dir returns failure" {
+  setup_fixture_dir "test-org" "empty-repo"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/empty-repo"
+  assert_failure
+}
+
+@test "run_repo_classifiers: benign workflow produces only META lines" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # Should have META lines and an UNPIN finding (benign has unpinned checkout@v4)
+  assert_output --partial "META|total_wf|1"
+  # No PRT, IC, WFR, SH, DP, HS findings
+  refute_output --partial "PRT|"
+  refute_output --partial "IC|"
+  refute_output --partial "WFR|"
+  refute_output --partial "SH|"
+  refute_output --partial "DP|"
+  refute_output --partial "HS|"
 }
 
 # =============================================================================

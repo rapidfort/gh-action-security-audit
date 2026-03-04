@@ -740,6 +740,32 @@
   implemented: false
   card: 4yh
 
+- id: GHA-029
+  title: "Organization secrets SHOULD be scoped to selected repositories, not all"
+  desc: >
+    Org secrets with visibility set to 'all' are available to every repository
+    in the organization, violating the principle of least privilege. If any
+    repository is compromised, the attacker gains access to all org secrets.
+    Scoping secrets to only the repositories that need them limits blast radius.
+  check: >
+    Verify that no org-level secret has visibility set to 'all'. All org
+    secrets should use 'selected' (with an explicit repo list) or 'private'.
+  fix: >
+    Scope each org secret to only the repositories that reference it:
+    gh secret set SECRET_NAME --org ORG --visibility selected --repos repo1,repo2
+    Use the remediation commands in the org secrets table.
+  impact: 0.5
+  severity: medium
+  cci:
+    - CCI-000225  # AC-6: Least Privilege
+    - CCI-000183  # IA-5: Protect authenticators
+  nist:
+    - AC-6
+    - IA-5
+  owasp_cicd: CICD-SEC-6
+  classifier: org_secret_scoping
+  implemented: true
+
 - id: GHA-028
   title: "Organization SHOULD restrict which repositories can use GitHub Actions"
   desc: >

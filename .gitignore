@@ -7,3 +7,4 @@
 *.tmp
 test/report-*.md
 test/report-*.csv
+.beads/recovery-context.md

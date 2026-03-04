@@ -8,11 +8,13 @@ setup() {
 # Temp file safety — all temp files must be created via mktemp
 # =============================================================================
 
-@test "TABLE_ROWS csv file uses mktemp, not string concatenation" {
-  # The csv companion file must be its own mktemp call, not $TABLE_ROWS.csv
-  run grep -n 'TABLE_ROWS\.csv' "$SCRIPT"
-  # Should NOT find any definition like TABLE_ROWS.csv that's just appending .csv
-  refute_output --partial '$TABLE_ROWS.csv'
+@test "TABLE_ROWS_FILE and TABLE_ROWS_CSV_FILE use separate mktemp calls" {
+  # Each temp file must be its own mktemp call, not string concatenation
+  run grep -c 'TABLE_ROWS.*mktemp\|mktemp.*TABLE_ROWS' "$SCRIPT"
+  # Should appear at least twice (one for md, one for csv)
+  assert_success
+  local count="${output}"
+  [ "$count" -ge 2 ]
 }
 
 @test "AUDIT_DIR uses mktemp -d when not using --local" {
@@ -29,7 +31,7 @@ setup() {
 @test "cleanup function removes temp files" {
   run grep -A5 'cleanup()' "$SCRIPT"
   assert_success
-  assert_output --partial 'TABLE_ROWS'
+  assert_output --partial 'TABLE_ROWS_FILE'
   assert_output --partial 'ORG_SECRETS_FILE'
 }
 
@@ -53,6 +55,13 @@ setup() {
   # Should appear at least once (the definition)
   run grep 'analyze_repo ' "$SCRIPT"
   assert_success
+}
+
+@test "handle_cache_cleanup function is defined and called" {
+  run grep -c 'handle_cache_cleanup()' "$SCRIPT"
+  assert_output "1"
+  run grep -c 'handle_cache_cleanup$' "$SCRIPT"
+  assert_output "1"
 }
 
 @test "workflow files are read once into a variable, not grepped repeatedly" {
@@ -81,6 +90,13 @@ setup() {
   assert_success
 }
 
+@test "sort-pipe-while loops use process substitution" {
+  # sort FILE | while runs the while body in a subshell (variable scoping risk).
+  # Use: while ... done < <(sort FILE) instead.
+  run grep -c 'sort.*| while' "$SCRIPT"
+  assert_output "0"
+}
+
 @test "script does not use python3 for JSON parsing" {
   # All JSON parsing should use gh api --jq, not python3
   run grep -n 'python3' "$SCRIPT"
@@ -96,6 +112,41 @@ setup() {
   # The pipe usage should reference the array, not a literal base64 -d
   run grep 'echo.*| base64 -d' "$SCRIPT"
   refute_output --partial '> "$repo_dir'
+}
+
+# =============================================================================
+# require_arg() unit tests
+# =============================================================================
+
+_run_require_arg() {
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    sed -n '/^require_arg()/,/^}/p' "$SCRIPT"
+    echo "$@"
+  } >"$tmpscript"
+  bash "$tmpscript"
+  local rc=$?
+  rm -f "$tmpscript"
+  return $rc
+}
+
+@test "require_arg: missing arg exits 1 with error" {
+  run _run_require_arg 'require_arg "--local" "" "a directory path" "/path/to/dir"'
+  assert_failure
+  assert_output --partial "Error: --local requires a directory path"
+}
+
+@test "require_arg: flag-like arg exits 1 with error" {
+  run _run_require_arg 'require_arg "--out" "--csv" "a filename" "report.md"'
+  assert_failure
+  assert_output --partial "Error: --out requires a filename"
+}
+
+@test "require_arg: valid arg succeeds silently" {
+  run _run_require_arg 'require_arg "--csv" "report.csv" "a filename" "report.csv"'
+  assert_success
+  assert_output ""
 }
 
 # --- Help flag ---

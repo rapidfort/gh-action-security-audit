@@ -78,6 +78,12 @@ setup() {
   assert_success
 }
 
+@test "prt-in-comment: NOT a false positive — comment-only pull_request_target is ignored" {
+  # The trigger check should use uncommented content only
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/prt-in-comment.yml' | grep -q 'pull_request_target'"
+  assert_failure
+}
+
 # =============================================================================
 # issue_comment detection
 # =============================================================================
@@ -104,6 +110,12 @@ setup() {
   assert_failure
 }
 
+@test "ic-in-comment: NOT a false positive — comment-only issue_comment is ignored" {
+  # The trigger check should use uncommented content only
+  run bash -c "grep -v '^\s*#' '$FIXTURES_DIR/workflows/ic-in-comment.yml' | grep -q 'issue_comment'"
+  assert_failure
+}
+
 # =============================================================================
 # Secret reference grep
 # =============================================================================
@@ -125,6 +137,45 @@ setup() {
   assert_success
   local count="${output}"
   [ "$count" -ge 3 ]
+}
+
+# =============================================================================
+# join_array_cells() unit tests
+# =============================================================================
+
+_run_join_array_cells() {
+  local tmpscript
+  tmpscript=$(mktemp)
+  {
+    sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
+    echo "$@"
+  } >"$tmpscript"
+  bash "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "join_array_cells: empty array returns No" {
+  run _run_join_array_cells 'join_array_cells "<br/>"'
+  assert_success
+  assert_output "No"
+}
+
+@test "join_array_cells: single element returns element" {
+  run _run_join_array_cells 'join_array_cells "<br/>" "foo.yml (API-only)"'
+  assert_success
+  assert_output "foo.yml (API-only)"
+}
+
+@test "join_array_cells: multiple elements joined with separator" {
+  run _run_join_array_cells 'join_array_cells "<br/>" "a.yml (API-only)" "b.yml (checkout)"'
+  assert_success
+  assert_output "a.yml (API-only)<br/>b.yml (checkout)"
+}
+
+@test "join_array_cells: CSV separator works" {
+  run _run_join_array_cells 'join_array_cells "; " "a.yml (API-only)" "b.yml (checkout)"'
+  assert_success
+  assert_output "a.yml (API-only); b.yml (checkout)"
 }
 
 # =============================================================================
@@ -194,7 +245,8 @@ _script_preamble() {
     gh() { echo ''; return 0; }
     export -f gh
 PREAMBLE
-  # Extract classify_prt, classify_ic, and analyze_repo
+  # Extract join_array_cells, classify_prt, classify_ic, and analyze_repo
+  sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_ic()/,/^}/p' "$SCRIPT"
   sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
@@ -255,6 +307,30 @@ _run_analyze_repo() {
   run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
   assert_line --index 0 --partial "no author gate"
+}
+
+@test "analyze_repo: prt-in-comment does NOT report pull_request_target" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/prt-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # PRT column should say "No" (third pipe-field)
+  refute_output --partial "pull_request_target"
+  refute_output --partial "checkout"
+  refute_output --partial "API-only"
+  assert_line --index 0 --partial "|No|"
+}
+
+@test "analyze_repo: ic-in-comment does NOT report issue_comment" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/ic-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # IC column should say "No" (fourth pipe-field)
+  refute_output --partial "issue_comment"
+  refute_output --partial "author"
 }
 
 @test "analyze_repo: empty directory returns failure" {

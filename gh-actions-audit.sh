@@ -64,11 +64,22 @@ set -euo pipefail
 # --- Cleanup on exit ---------------------------------------------------------
 
 cleanup() {
-  rm -f "${TABLE_ROWS:-}" "${TABLE_ROWS_CSV:-}" "${ORG_SECRETS_FILE:-}" "${SECRET_MAP_FILE:-}"
+  rm -f "${TABLE_ROWS_FILE:-}" "${TABLE_ROWS_CSV_FILE:-}" "${ORG_SECRETS_FILE:-}" "${SECRET_MAP_FILE:-}"
 }
 trap cleanup EXIT
 
 # --- Argument Parsing --------------------------------------------------------
+
+# require_arg: validate that an option has a non-empty, non-flag argument
+# Args: option_name next_arg description example
+require_arg() {
+  local opt="$1" next="${2:-}" desc="$3" example="$4"
+  if [ -z "$next" ] || [[ "$next" == -* ]]; then
+    echo "Error: $opt requires $desc." >&2
+    echo "Usage: $0 <ORG> $opt $example" >&2
+    exit 1
+  fi
+}
 
 LOCAL_DIR=""
 ORG=""
@@ -79,29 +90,17 @@ CLEANUP=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --local)
-      if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
-        echo "Error: --local requires a directory path." >&2
-        echo "Usage: $0 <ORG> --local /path/to/previous/audit/dir" >&2
-        exit 1
-      fi
+      require_arg "--local" "${2:-}" "a directory path" "/path/to/previous/audit/dir"
       LOCAL_DIR="$2"
       shift 2
       ;;
     --out)
-      if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
-        echo "Error: --out requires a filename." >&2
-        echo "Usage: $0 <ORG> --out report.md" >&2
-        exit 1
-      fi
+      require_arg "--out" "${2:-}" "a filename" "report.md"
       OUT_FILE="$2"
       shift 2
       ;;
     --csv)
-      if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
-        echo "Error: --csv requires a filename." >&2
-        echo "Usage: $0 <ORG> --csv report.csv" >&2
-        exit 1
-      fi
+      require_arg "--csv" "${2:-}" "a filename" "report.csv"
       CSV_FILE="$2"
       shift 2
       ;;
@@ -182,6 +181,50 @@ warn() { printf "${YELLOW}[WARN]${RESET}  %s\n" "$*"; }
 crit() { printf "${RED}[CRIT]${RESET}  %s\n" "$*"; }
 ok() { printf "${GREEN}[ OK ]${RESET}  %s\n" "$*"; }
 progress() { printf "${DIM}  ... %s${RESET}\r" "$*"; }
+
+# --- handle_cache_cleanup: manage workflow cache after run ---
+# Globals: LOCAL_DIR, CLEANUP, AUDIT_DIR, WORKFLOWS_DIR, ORG, OUT_FILE, CSV_FILE
+handle_cache_cleanup() {
+  local wf_size
+  wf_size=$(du -sh "$WORKFLOWS_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+
+  if [ -n "$LOCAL_DIR" ]; then
+    info "Workflows (pre-existing): $WORKFLOWS_DIR ($wf_size)"
+    return
+  fi
+
+  if [ "$CLEANUP" = "1" ]; then
+    rm -rf "$AUDIT_DIR"
+    info "Cleaned up cached workflows ($wf_size)"
+    return
+  fi
+
+  info "Workflows cached at: $WORKFLOWS_DIR ($wf_size)"
+
+  local reuse_cmd="$0 $ORG --local $AUDIT_DIR --out $OUT_FILE"
+  [ -n "$CSV_FILE" ] && reuse_cmd+=" --csv $CSV_FILE"
+
+  if [ -t 0 ] && [ -t 1 ]; then
+    printf "\nDelete cached workflow files? They can be reused with --local. [y/N]: "
+    local cleanup_choice
+    read -r cleanup_choice
+    if [[ "$cleanup_choice" =~ ^[yY]$ ]]; then
+      rm -rf "$AUDIT_DIR"
+      info "Cleaned up cached workflows."
+    else
+      echo ""
+      info "To re-run without re-downloading:"
+      echo "  $reuse_cmd"
+      info "To delete later: rm -rf $AUDIT_DIR"
+    fi
+  else
+    echo ""
+    info "To re-run without re-downloading:"
+    echo "  $reuse_cmd"
+    info "To delete cached workflows: rm -rf $AUDIT_DIR"
+    info "Or re-run with --cleanup to auto-delete after completion."
+  fi
+}
 
 # --- Preflight ---------------------------------------------------------------
 
@@ -301,7 +344,7 @@ classify_prt() {
   local dep_tag=""
   [ "$is_dependabot" = "1" ] && dep_tag=" (Dependabot)"
 
-  local detail detail_csv
+  local detail="" detail_csv=""
   if [ "$has_fork_ref" = "1" ] && [ "$has_author_guard" = "0" ]; then
     detail="$wf_name$dep_tag (**checkout+exec, no guard**)"
     detail_csv="$wf_name$dep_tag (checkout+exec; no guard)"
@@ -319,12 +362,31 @@ classify_prt() {
   echo "${detail}|${detail_csv}"
 }
 
+# --- join_array_cells: join array elements with a separator, or "No" if empty ---
+# Args: separator element [element ...]
+# Outputs: joined string (or "No" if no elements)
+join_array_cells() {
+  local sep="$1"
+  shift
+  if [ $# -eq 0 ]; then
+    echo "No"
+    return
+  fi
+  local result="$1"
+  shift
+  while [ $# -gt 0 ]; do
+    result+="${sep}$1"
+    shift
+  done
+  echo "$result"
+}
+
 # --- classify_ic: classify an issue_comment workflow ---
 # Args: wf_name wf_content wf_uncommented
 # Outputs: md_detail|csv_detail
 classify_ic() {
   local wf_name="$1" wf_content="$2" wf_uncommented="$3"
-  local detail detail_csv
+  local detail="" detail_csv=""
 
   if grep -q 'author_association' <<<"$wf_uncommented"; then
     detail="$wf_name (has author_association)"
@@ -374,7 +436,7 @@ analyze_repo() {
     fi
 
     # --- pull_request_target ---
-    if [[ $wf_content == *pull_request_target* ]]; then
+    if [[ $wf_uncommented == *pull_request_target* ]]; then
       local prt_result
       prt_result=$(classify_prt "$wf_name" "$wf_content" "$wf_uncommented")
       prt_wfs+=("${prt_result%%|*}")
@@ -382,7 +444,7 @@ analyze_repo() {
     fi
 
     # --- issue_comment ---
-    if [[ $wf_content == *issue_comment* ]]; then
+    if [[ $wf_uncommented == *issue_comment* ]]; then
       local ic_result
       ic_result=$(classify_ic "$wf_name" "$wf_content" "$wf_uncommented")
       ic_wfs+=("${ic_result%%|*}")
@@ -404,32 +466,12 @@ analyze_repo() {
   fi
 
   local prt_cell prt_csv
-  if [ ${#prt_wfs[@]} -eq 0 ]; then
-    prt_cell="No"
-    prt_csv="No"
-  else
-    prt_cell=$(printf '%s' "${prt_wfs[0]}")
-    prt_csv=$(printf '%s' "${prt_wfs_csv[0]}")
-    local i
-    for ((i = 1; i < ${#prt_wfs[@]}; i++)); do
-      prt_cell+=$(printf '<br/>%s' "${prt_wfs[$i]}")
-      prt_csv+=$(printf '; %s' "${prt_wfs_csv[$i]}")
-    done
-  fi
+  prt_cell=$(join_array_cells '<br/>' "${prt_wfs[@]+"${prt_wfs[@]}"}")
+  prt_csv=$(join_array_cells '; ' "${prt_wfs_csv[@]+"${prt_wfs_csv[@]}"}")
 
   local ic_cell ic_csv
-  if [ ${#ic_wfs[@]} -eq 0 ]; then
-    ic_cell="No"
-    ic_csv="No"
-  else
-    ic_cell=$(printf '%s' "${ic_wfs[0]}")
-    ic_csv=$(printf '%s' "${ic_wfs_csv[0]}")
-    local i
-    for ((i = 1; i < ${#ic_wfs[@]}; i++)); do
-      ic_cell+=$(printf '<br/>%s' "${ic_wfs[$i]}")
-      ic_csv+=$(printf '; %s' "${ic_wfs_csv[$i]}")
-    done
-  fi
+  ic_cell=$(join_array_cells '<br/>' "${ic_wfs[@]+"${ic_wfs[@]}"}")
+  ic_csv=$(join_array_cells '; ' "${ic_wfs_csv[@]+"${ic_wfs_csv[@]}"}")
 
   local secrets_cell=""
   local secret_names
@@ -449,8 +491,8 @@ analyze_repo() {
 }
 
 # Temp files to accumulate table rows
-TABLE_ROWS=$(mktemp)
-TABLE_ROWS_CSV=$(mktemp)
+TABLE_ROWS_FILE=$(mktemp)
+TABLE_ROWS_CSV_FILE=$(mktemp)
 
 for repo in "${REPOS[@]}"; do
   repo_dir="$WORKFLOWS_DIR/$ORG/$repo"
@@ -459,8 +501,8 @@ for repo in "${REPOS[@]}"; do
   result=$(analyze_repo "$repo" "$repo_dir") || continue
 
   # First line is markdown, second is csv
-  echo "$result" | head -1 >>"$TABLE_ROWS"
-  echo "$result" | tail -1 >>"$TABLE_ROWS_CSV"
+  echo "$result" | head -1 >>"$TABLE_ROWS_FILE"
+  echo "$result" | tail -1 >>"$TABLE_ROWS_CSV_FILE"
   progress "$repo"
 done
 
@@ -529,7 +571,17 @@ if [ -n "$org_secrets" ]; then
       | cut -d'|' -f2 | sort -u | paste -sd',' - || true)
     [ -z "$referenced_repos" ] && referenced_repos="(none)"
 
-    echo "${secret_name}|${vis_display}|${configured_repos}|${referenced_repos}" >>"$ORG_SECRETS_FILE"
+    # Build remediation command once (used by both md and csv reports)
+    remediation_cmd=""
+    if [ "$vis_display" = "All repositories" ]; then
+      if [ "$referenced_repos" = "(none)" ]; then
+        remediation_cmd="Unreferenced - verify if still needed"
+      else
+        remediation_cmd="gh secret set $secret_name --org $ORG --visibility selected --repos $referenced_repos"
+      fi
+    fi
+
+    echo "${secret_name}|${vis_display}|${configured_repos}|${referenced_repos}|${remediation_cmd}" >>"$ORG_SECRETS_FILE"
   done <<<"$org_secrets"
 fi
 
@@ -628,9 +680,9 @@ PERREPO
   echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Repo Secrets |"
   echo "|------------|-------------|----------------------|-----------------|--------------|"
 
-  sort "$TABLE_ROWS" | while IFS='|' read -r repo perms prt ic secrets; do
+  while IFS='|' read -r repo perms prt ic secrets; do
     echo "| \`$repo\` | $perms | $prt | $ic | $secrets |"
-  done
+  done < <(sort "$TABLE_ROWS_FILE")
 
   # --- Org secrets section ---
 
@@ -660,21 +712,13 @@ ORGSECRETS
     echo "| Secret Name | Visibility | Configured Access | Referenced In Workflows | Suggested Command |"
     echo "|-------------|------------|-------------------|------------------------|-------------------|"
 
-    sort "$ORG_SECRETS_FILE" | while IFS='|' read -r name vis configured referenced; do
-      case "$vis" in
-        "All repositories")
-          if [ "$referenced" = "(none)" ]; then
-            cmd="Unreferenced — verify if still needed"
-          else
-            cmd="\`gh secret set $name --org $ORG --visibility selected --repos $referenced\`"
-          fi
-          echo "| \`$name\` | **All repositories** | (all) | $referenced | $cmd |"
-          ;;
-        *)
-          echo "| \`$name\` | $vis | $configured | $referenced | — |"
-          ;;
-      esac
-    done
+    while IFS='|' read -r name vis configured referenced cmd; do
+      if [ -n "$cmd" ]; then
+        echo "| \`$name\` | **$vis** | $configured | $referenced | \`$cmd\` |"
+      else
+        echo "| \`$name\` | $vis | $configured | $referenced | — |"
+      fi
+    done < <(sort "$ORG_SECRETS_FILE")
   fi
 
   # --- Guidance ---
@@ -738,35 +782,27 @@ if [ -n "$CSV_FILE" ]; then
 
   {
     echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Repo Secrets"
-    sort "$TABLE_ROWS_CSV" | while IFS='|' read -r repo perms prt ic secrets; do
+    while IFS='|' read -r repo perms prt ic secrets; do
       printf '%s,%s,%s,%s,%s\n' \
         "$(csv_field "$repo")" \
         "$(csv_field "$perms")" \
         "$(csv_field "$prt")" \
         "$(csv_field "$ic")" \
         "$(csv_field "$secrets")"
-    done
+    done < <(sort "$TABLE_ROWS_CSV_FILE")
 
     # Blank row separator, then org secrets
     echo ""
     echo "Org Secret,Visibility,Configured Access,Referenced In Workflows,Suggested Command"
     if [ -s "$ORG_SECRETS_FILE" ]; then
-      sort "$ORG_SECRETS_FILE" | while IFS='|' read -r name vis configured referenced; do
-        cmd=""
-        if [ "$vis" = "All repositories" ]; then
-          if [ "$referenced" = "(none)" ]; then
-            cmd="Unreferenced - verify if still needed"
-          else
-            cmd="gh secret set $name --org $ORG --visibility selected --repos $referenced"
-          fi
-        fi
+      while IFS='|' read -r name vis configured referenced cmd; do
         printf '%s,%s,%s,%s,%s\n' \
           "$(csv_field "$name")" \
           "$(csv_field "$vis")" \
           "$(csv_field "$configured")" \
           "$(csv_field "$referenced")" \
           "$(csv_field "$cmd")"
-      done
+      done < <(sort "$ORG_SECRETS_FILE")
     fi
   } >"$CSV_FILE"
 
@@ -776,47 +812,4 @@ fi
 # --- Cleanup (temp files handled by trap EXIT) ---
 
 info "Report written to: $OUT_FILE"
-
-# Workflow cache cleanup
-wf_size=$(du -sh "$WORKFLOWS_DIR" 2>/dev/null | cut -f1 || echo "unknown")
-
-if [ -n "$LOCAL_DIR" ]; then
-  # Using pre-existing local data — don't offer to delete it
-  info "Workflows (pre-existing): $WORKFLOWS_DIR ($wf_size)"
-elif [ "$CLEANUP" = "1" ]; then
-  # Explicit --cleanup flag
-  rm -rf "$AUDIT_DIR"
-  info "Cleaned up cached workflows ($wf_size)"
-else
-  info "Workflows cached at: $WORKFLOWS_DIR ($wf_size)"
-
-  if [ -t 0 ] && [ -t 1 ]; then
-    # Interactive terminal — prompt
-    printf "\nDelete cached workflow files? They can be reused with --local. [y/N]: "
-    read -r cleanup_choice
-    if [[ "$cleanup_choice" =~ ^[yY]$ ]]; then
-      rm -rf "$AUDIT_DIR"
-      info "Cleaned up cached workflows."
-    else
-      echo ""
-      info "To re-run without re-downloading:"
-      if [ -n "$CSV_FILE" ]; then
-        echo "  $0 $ORG --local $AUDIT_DIR --out $OUT_FILE --csv $CSV_FILE"
-      else
-        echo "  $0 $ORG --local $AUDIT_DIR --out $OUT_FILE"
-      fi
-      info "To delete later: rm -rf $AUDIT_DIR"
-    fi
-  else
-    # Non-interactive — just print the reuse command
-    echo ""
-    info "To re-run without re-downloading:"
-    if [ -n "$CSV_FILE" ]; then
-      echo "  $0 $ORG --local $AUDIT_DIR --out $OUT_FILE --csv $CSV_FILE"
-    else
-      echo "  $0 $ORG --local $AUDIT_DIR --out $OUT_FILE"
-    fi
-    info "To delete cached workflows: rm -rf $AUDIT_DIR"
-    info "Or re-run with --cleanup to auto-delete after completion."
-  fi
-fi
+handle_cache_cleanup

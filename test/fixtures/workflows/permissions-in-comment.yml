@@ -1,0 +1,12 @@
+name: Build
+on: push
+
+# NOTE: We don't set permissions: here because the org default is fine.
+# The permissions: block would restrict the token unnecessarily.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "building"

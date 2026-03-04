@@ -97,6 +97,25 @@ The markdown report includes:
 - **Org-Level Secrets** table showing visibility, configured access, actual workflow usage, and `gh secret set` remediation commands
 - **Review Guidance** section explaining priority items, what the fork approval setting does and does not protect, and mitigations to look for
 
+## Development
+
+See [TESTING.md](TESTING.md) for the full testing guide.
+
+Quick start:
+
+```bash
+make test-deps     # Install bats-core + helpers
+make check         # Run shellcheck + bats tests
+```
+
+### Contributing
+
+This project follows a TDD workflow. Before fixing a bug or adding a feature:
+
+1. Write a failing test in the appropriate `test/test_*.bats` file
+2. Make the change in `gh-actions-audit.sh`
+3. Verify with `make check`
+
 ## License
 
-Apache-2.0
+MIT

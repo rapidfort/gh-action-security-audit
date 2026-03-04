@@ -1,0 +1,9 @@
+name: Issue Comment Handler
+on: issue_comment
+
+jobs:
+  handle:
+    if: github.event.comment.author_association == 'MEMBER'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Handling comment from member"

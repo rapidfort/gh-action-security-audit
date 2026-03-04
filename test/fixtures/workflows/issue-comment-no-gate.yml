@@ -1,0 +1,8 @@
+name: Issue Comment Bot
+on: issue_comment
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Comment body is ${{ github.event.comment.body }}"

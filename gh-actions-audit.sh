@@ -660,7 +660,99 @@ classify_unpinned() {
   echo "${detail}|${detail_csv}"
 }
 
-# --- run_repo_classifiers: run all 10 per-repo classifiers on a repo's workflows ---
+# --- classify_secrets_inherit: detect secrets: inherit in reusable workflow calls ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+classify_secrets_inherit() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  if grep -qE 'secrets:\s*inherit' <<<"$wf_uncommented"; then
+    echo "$wf_name (**secrets: inherit**)|$wf_name (secrets: inherit)"
+  fi
+}
+
+# --- classify_env_injection: detect writes to GITHUB_ENV/PATH/OUTPUT ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Flags any write to GITHUB_ENV, GITHUB_PATH, or GITHUB_OUTPUT as a risk.
+classify_env_injection() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local targets=()
+  # shellcheck disable=SC2016
+  if grep -qE '>>\s*"?\$GITHUB_ENV' <<<"$wf_uncommented"; then
+    targets+=("GITHUB_ENV")
+  fi
+  # shellcheck disable=SC2016
+  if grep -qE '>>\s*"?\$GITHUB_PATH' <<<"$wf_uncommented"; then
+    targets+=("GITHUB_PATH")
+  fi
+  # shellcheck disable=SC2016
+  if grep -qE '>>\s*"?\$GITHUB_OUTPUT' <<<"$wf_uncommented"; then
+    targets+=("GITHUB_OUTPUT")
+  fi
+  [ ${#targets[@]} -eq 0 ] && return 0
+
+  local target_list
+  target_list=$(printf '%s, ' "${targets[@]}")
+  target_list="${target_list%, }"
+
+  echo "$wf_name (**${target_list}**)|$wf_name (${target_list})"
+}
+
+# --- classify_deprecated_commands: detect deprecated workflow commands ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Detects: ::set-output, ::save-state, ::set-env, ::add-path
+classify_deprecated_commands() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local cmds=()
+  if grep -q '::set-output' <<<"$wf_uncommented"; then
+    cmds+=("set-output")
+  fi
+  if grep -q '::save-state' <<<"$wf_uncommented"; then
+    cmds+=("save-state")
+  fi
+  if grep -q '::set-env' <<<"$wf_uncommented"; then
+    cmds+=("set-env")
+  fi
+  if grep -q '::add-path' <<<"$wf_uncommented"; then
+    cmds+=("add-path")
+  fi
+  [ ${#cmds[@]} -eq 0 ] && return 0
+
+  local cmd_list
+  cmd_list=$(printf '%s, ' "${cmds[@]}")
+  cmd_list="${cmd_list%, }"
+
+  echo "$wf_name (**::${cmd_list}**)|$wf_name (::${cmd_list})"
+}
+
+# --- classify_known_vulnerable: detect known-compromised actions ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Blocklist: tj-actions/changed-files, reviewdog/action-setup,
+#            dawidd6/action-download-artifact
+classify_known_vulnerable() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local found=()
+  if grep -qE 'uses:.*tj-actions/changed-files' <<<"$wf_uncommented"; then
+    found+=("tj-actions/changed-files")
+  fi
+  if grep -qE 'uses:.*reviewdog/action-setup' <<<"$wf_uncommented"; then
+    found+=("reviewdog/action-setup")
+  fi
+  if grep -qE 'uses:.*dawidd6/action-download-artifact' <<<"$wf_uncommented"; then
+    found+=("dawidd6/action-download-artifact")
+  fi
+  [ ${#found[@]} -eq 0 ] && return 0
+
+  local found_list
+  found_list=$(printf '%s, ' "${found[@]}")
+  found_list="${found_list%, }"
+
+  echo "$wf_name (**${found_list}**)|$wf_name (${found_list})"
+}
+
+# --- run_repo_classifiers: run all per-repo classifiers on a repo's workflows ---
 # Writes results to a cache file for consumption by build_hdf_repo_target and render_md_csv_row.
 # Args: repo_dir cache_file
 # Cache format: TAG|md_detail|csv_detail  or  META|key|value
@@ -749,6 +841,34 @@ run_repo_classifiers() {
     hs_result=$(classify_hardcoded_secrets "$wf_name" "$wf_content" "$wf_uncommented")
     if [ -n "$hs_result" ]; then
       echo "HS|${hs_result}" >>"$cache_file"
+    fi
+
+    # --- secrets: inherit ---
+    local si_result
+    si_result=$(classify_secrets_inherit "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$si_result" ]; then
+      echo "SI|${si_result}" >>"$cache_file"
+    fi
+
+    # --- GITHUB_ENV/PATH/OUTPUT injection ---
+    local ei_result
+    ei_result=$(classify_env_injection "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$ei_result" ]; then
+      echo "EI|${ei_result}" >>"$cache_file"
+    fi
+
+    # --- Deprecated workflow commands ---
+    local dc_result
+    dc_result=$(classify_deprecated_commands "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$dc_result" ]; then
+      echo "DC|${dc_result}" >>"$cache_file"
+    fi
+
+    # --- Known-compromised actions ---
+    local kv_result
+    kv_result=$(classify_known_vulnerable "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$kv_result" ]; then
+      echo "KV|${kv_result}" >>"$cache_file"
     fi
 
     # --- Harden-runner ---
@@ -882,6 +1002,50 @@ _hdf_result_GHA_010() {
   fi
 }
 
+# GHA-014: secrets: inherit
+_hdf_result_GHA_014() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No secrets: inherit found in reusable workflow calls'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|secrets: inherit findings|%s' "$detail"
+  fi
+}
+
+# GHA-015: GITHUB_ENV/PATH/OUTPUT injection
+_hdf_result_GHA_015() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No writes to GITHUB_ENV/PATH/OUTPUT found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|GITHUB_ENV/PATH/OUTPUT write findings|%s' "$detail"
+  fi
+}
+
+# GHA-017: Deprecated workflow commands
+_hdf_result_GHA_017() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No deprecated workflow commands found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Deprecated workflow command findings|%s' "$detail"
+  fi
+}
+
+# GHA-018: Known-compromised actions
+_hdf_result_GHA_018() {
+  if [ $# -eq 0 ]; then
+    printf 'passed|No known-compromised actions found'
+  else
+    local detail
+    detail=$(printf '%s; ' "$@")
+    printf 'failed|Known-compromised action findings|%s' "$detail"
+  fi
+}
+
 # GHA-011: Org default workflow permissions
 # Args: $1=default_wf_perm (e.g., "read" or "write")
 _hdf_result_GHA_011() {
@@ -949,6 +1113,7 @@ build_hdf_repo_target() {
   # Read classifier findings from cache (MD detail only, used for HDF codeDesc)
   local prt_findings=() ic_findings=() unpin_findings=() expr_findings=()
   local wfr_findings=() sh_findings=() dp_findings=() hs_findings=()
+  local si_findings=() ei_findings=() dc_findings=() kv_findings=()
 
   local tag md_detail csv_detail
   while IFS='|' read -r tag md_detail csv_detail; do
@@ -961,6 +1126,10 @@ build_hdf_repo_target() {
       SH) sh_findings+=("$md_detail") ;;
       DP) dp_findings+=("$md_detail") ;;
       HS) hs_findings+=("$md_detail") ;;
+      SI) si_findings+=("$md_detail") ;;
+      EI) ei_findings+=("$md_detail") ;;
+      DC) dc_findings+=("$md_detail") ;;
+      KV) kv_findings+=("$md_detail") ;;
     esac
   done < <(grep -v '^META|' "$cache_file")
 
@@ -985,6 +1154,10 @@ build_hdf_repo_target() {
           GHA-008) result=$(_hdf_result_GHA_008 "${dp_findings[@]}") ;;
           GHA-009) result=$(_hdf_result_GHA_009 "${hs_findings[@]}") ;;
           GHA-010) result=$(_hdf_result_GHA_010 "$has_harden_runner") ;;
+          GHA-014) result=$(_hdf_result_GHA_014 "${si_findings[@]}") ;;
+          GHA-015) result=$(_hdf_result_GHA_015 "${ei_findings[@]}") ;;
+          GHA-017) result=$(_hdf_result_GHA_017 "${dc_findings[@]}") ;;
+          GHA-018) result=$(_hdf_result_GHA_018 "${kv_findings[@]}") ;;
           *) result="notReviewed|Detection not yet implemented" ;;
         esac
         IFS='|' read -r status code_desc message <<<"$result"

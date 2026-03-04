@@ -1,0 +1,9 @@
+name: GITHUB_ENV in comment only
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # echo "FOO=bar" >> $GITHUB_ENV
+      - run: echo "hello"

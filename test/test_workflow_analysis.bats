@@ -271,6 +271,10 @@ PREAMBLE
   sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_secrets_inherit()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_env_injection()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_deprecated_commands()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_known_vulnerable()/,/^}/p' "$SCRIPT"
   sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
   # HDF result functions and HDF pipeline
   sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
@@ -283,6 +287,10 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_008()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_009()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_010()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_014()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_015()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_017()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
   sed -n '/^_extract_hdf_status()/,/^}/p' "$SCRIPT"
   sed -n '/^render_md_csv_row()/,/^}/p' "$SCRIPT"
@@ -1124,6 +1132,186 @@ _run_repo_classifiers() {
   refute_output --partial "SH|"
   refute_output --partial "DP|"
   refute_output --partial "HS|"
+}
+
+# =============================================================================
+# secrets: inherit detection (GHA-014)
+# =============================================================================
+
+@test "classify_secrets_inherit: detects secrets: inherit" {
+  run _run_classifier classify_secrets_inherit "$FIXTURES_DIR/workflows/secrets-inherit.yml"
+  assert_success
+  assert_output --partial "secrets: inherit"
+}
+
+@test "classify_secrets_inherit: explicit secrets returns empty" {
+  run _run_classifier classify_secrets_inherit "$FIXTURES_DIR/workflows/secrets-explicit.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_secrets_inherit: commented-out inherit returns empty" {
+  run _run_classifier classify_secrets_inherit "$FIXTURES_DIR/workflows/secrets-inherit-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_secrets_inherit: benign workflow returns empty" {
+  run _run_classifier classify_secrets_inherit "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# GITHUB_ENV/PATH/OUTPUT injection detection (GHA-015)
+# =============================================================================
+
+@test "classify_env_injection: detects GITHUB_ENV write" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/env-injection-github-env.yml"
+  assert_success
+  assert_output --partial "GITHUB_ENV"
+}
+
+@test "classify_env_injection: detects GITHUB_PATH write" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/env-injection-github-path.yml"
+  assert_success
+  assert_output --partial "GITHUB_PATH"
+}
+
+@test "classify_env_injection: detects GITHUB_OUTPUT write" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/env-injection-github-output.yml"
+  assert_success
+  assert_output --partial "GITHUB_OUTPUT"
+}
+
+@test "classify_env_injection: detects multiple targets" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/env-injection-multiple.yml"
+  assert_success
+  assert_output --partial "GITHUB_ENV"
+  assert_output --partial "GITHUB_PATH"
+}
+
+@test "classify_env_injection: commented-out write returns empty" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/env-injection-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_env_injection: benign workflow returns empty" {
+  run _run_classifier classify_env_injection "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Deprecated workflow commands detection (GHA-017)
+# =============================================================================
+
+@test "classify_deprecated_commands: detects ::set-output" {
+  run _run_classifier classify_deprecated_commands "$FIXTURES_DIR/workflows/deprecated-set-output.yml"
+  assert_success
+  assert_output --partial "set-output"
+}
+
+@test "classify_deprecated_commands: detects ::set-env and ::add-path" {
+  run _run_classifier classify_deprecated_commands "$FIXTURES_DIR/workflows/deprecated-set-env.yml"
+  assert_success
+  assert_output --partial "set-env"
+  assert_output --partial "add-path"
+}
+
+@test "classify_deprecated_commands: commented-out command returns empty" {
+  run _run_classifier classify_deprecated_commands "$FIXTURES_DIR/workflows/deprecated-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_deprecated_commands: benign workflow returns empty" {
+  run _run_classifier classify_deprecated_commands "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Known-compromised actions detection (GHA-018)
+# =============================================================================
+
+@test "classify_known_vulnerable: detects tj-actions/changed-files" {
+  run _run_classifier classify_known_vulnerable "$FIXTURES_DIR/workflows/known-vulnerable-tj-actions.yml"
+  assert_success
+  assert_output --partial "tj-actions/changed-files"
+}
+
+@test "classify_known_vulnerable: detects reviewdog/action-setup" {
+  run _run_classifier classify_known_vulnerable "$FIXTURES_DIR/workflows/known-vulnerable-reviewdog.yml"
+  assert_success
+  assert_output --partial "reviewdog/action-setup"
+}
+
+@test "classify_known_vulnerable: commented-out action returns empty" {
+  run _run_classifier classify_known_vulnerable "$FIXTURES_DIR/workflows/known-vulnerable-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_known_vulnerable: benign workflow returns empty" {
+  run _run_classifier classify_known_vulnerable "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# --- run_repo_classifiers integration for new detections ---
+
+@test "run_repo_classifiers: SI finding for secrets-inherit" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/secrets-inherit.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "SI|"
+  assert_output --partial "secrets: inherit"
+}
+
+@test "run_repo_classifiers: EI finding for env injection" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/env-injection-github-env.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "EI|"
+  assert_output --partial "GITHUB_ENV"
+}
+
+@test "run_repo_classifiers: DC finding for deprecated commands" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/deprecated-set-output.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "DC|"
+  assert_output --partial "set-output"
+}
+
+@test "run_repo_classifiers: KV finding for known-vulnerable" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/known-vulnerable-tj-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "KV|"
+  assert_output --partial "tj-actions/changed-files"
+}
+
+@test "run_repo_classifiers: benign workflow has no SI, EI, DC, KV findings" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_repo_classifiers "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  refute_output --partial "SI|"
+  refute_output --partial "EI|"
+  refute_output --partial "DC|"
+  refute_output --partial "KV|"
 }
 
 # =============================================================================

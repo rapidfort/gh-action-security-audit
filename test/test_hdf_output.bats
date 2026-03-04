@@ -204,6 +204,10 @@ PREAMBLE
   sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_secrets_inherit()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_env_injection()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_deprecated_commands()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_known_vulnerable()/,/^}/p' "$SCRIPT"
   sed -n '/^run_repo_classifiers()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_001()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_002()/,/^}/p' "$SCRIPT"
@@ -218,6 +222,10 @@ PREAMBLE
   sed -n '/^_hdf_result_GHA_011()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_012()/,/^}/p' "$SCRIPT"
   sed -n '/^_hdf_result_GHA_013()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_014()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_015()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_017()/,/^}/p' "$SCRIPT"
+  sed -n '/^_hdf_result_GHA_018()/,/^}/p' "$SCRIPT"
   sed -n '/^build_hdf_repo_target()/,/^}/p' "$SCRIPT"
 }
 
@@ -453,6 +461,90 @@ _run_hdf_repo_target() {
   assert_output --partial '"GHA-010"'
 }
 
+# --- GHA-014: secrets: inherit ---
+
+@test "build_hdf_repo_target: GHA-014 failed for secrets-inherit" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/secrets-inherit.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-014"'
+  assert_output --partial '"failed"'
+}
+
+@test "build_hdf_repo_target: GHA-014 passed for explicit secrets" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/secrets-explicit.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-014"'
+}
+
+# --- GHA-015: GITHUB_ENV/PATH/OUTPUT injection ---
+
+@test "build_hdf_repo_target: GHA-015 failed for env-injection" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/env-injection-github-env.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-015"'
+  assert_output --partial '"failed"'
+}
+
+@test "build_hdf_repo_target: GHA-015 passed for benign workflow" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-015"'
+}
+
+# --- GHA-017: Deprecated workflow commands ---
+
+@test "build_hdf_repo_target: GHA-017 failed for deprecated-set-output" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/deprecated-set-output.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-017"'
+  assert_output --partial '"failed"'
+}
+
+@test "build_hdf_repo_target: GHA-017 passed for benign workflow" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-017"'
+}
+
+# --- GHA-018: Known-compromised actions ---
+
+@test "build_hdf_repo_target: GHA-018 failed for tj-actions" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/known-vulnerable-tj-actions.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-018"'
+  assert_output --partial '"failed"'
+}
+
+@test "build_hdf_repo_target: GHA-018 passed for benign workflow" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial '"GHA-018"'
+}
+
 # --- All per-repo requirements present (implemented + unimplemented) ---
 
 @test "build_hdf_repo_target: all 23 per-repo requirement IDs present" {
@@ -461,12 +553,12 @@ _run_hdf_repo_target() {
 
   run _run_hdf_repo_target "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
   assert_success
-  # 10 implemented per-repo checks
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010; do
+  # 14 implemented per-repo checks
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-017 GHA-018; do
     assert_output --partial "\"$id\""
   done
-  # 13 unimplemented per-repo checks (notReviewed)
-  for id in GHA-014 GHA-015 GHA-016 GHA-017 GHA-018 GHA-019 GHA-020 GHA-021 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
+  # 9 unimplemented per-repo checks (notReviewed)
+  for id in GHA-016 GHA-019 GHA-020 GHA-021 GHA-022 GHA-023 GHA-024 GHA-025 GHA-026; do
     assert_output --partial "\"$id\""
   done
 }
@@ -664,7 +756,7 @@ _run_hdf_org_target() {
   run _run_hdf_org_target "test-org" "read" "false" "selected"
   assert_success
   # Per-repo IDs must NOT appear in org target
-  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010; do
+  for id in GHA-001 GHA-002 GHA-003 GHA-004 GHA-005 GHA-006 GHA-007 GHA-008 GHA-009 GHA-010 GHA-014 GHA-015 GHA-017 GHA-018; do
     refute_output --partial "\"$id\""
   done
 }

@@ -1,0 +1,8 @@
+name: Write to GITHUB_OUTPUT
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "result=success" >> $GITHUB_OUTPUT

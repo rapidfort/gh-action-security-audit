@@ -1,0 +1,10 @@
+name: Write to GITHUB_ENV and GITHUB_PATH
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "FOO=bar" >> $GITHUB_ENV
+          echo "/opt/mybin" >> $GITHUB_PATH

@@ -382,7 +382,7 @@
     - AC-6
   owasp_cicd: CICD-SEC-6
   classifier: classify_secrets_inherit
-  implemented: false
+  implemented: true
   card: 1ts
 
 - id: GHA-015
@@ -412,7 +412,7 @@
     - SI-10
   owasp_cicd: CICD-SEC-4
   classifier: classify_env_injection
-  implemented: false
+  implemented: true
   card: 3io
 
 - id: GHA-016
@@ -469,7 +469,7 @@
     - CM-6
   owasp_cicd: CICD-SEC-4
   classifier: classify_deprecated_commands
-  implemented: false
+  implemented: true
   card: vdc
 
 - id: GHA-018
@@ -497,7 +497,7 @@
     - SI-7 (1)
   owasp_cicd: CICD-SEC-3
   classifier: classify_known_vulnerable
-  implemented: false
+  implemented: true
   card: v6j
 
 - id: GHA-019

@@ -1,0 +1,9 @@
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
+
+# Test artifacts
+*.tmp
+test/report-*.md
+test/report-*.csv

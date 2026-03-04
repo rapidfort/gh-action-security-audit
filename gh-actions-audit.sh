@@ -347,6 +347,23 @@ fi
 
 info "Analyzing workflows..."
 
+# --- extract_on_triggers: extract the on:/true: trigger section from a workflow ---
+# Args: wf_uncommented (workflow content with comments stripped)
+# Outputs: the text of the on: section (trigger declarations only)
+# Used to prevent false positives from trigger keywords appearing in run: blocks
+extract_on_triggers() {
+  local wf="$1"
+  awk '
+    /^on[[:space:]]*:/ || /^"on"[[:space:]]*:/ || /^'"'"'on'"'"'[[:space:]]*:/ || /^true[[:space:]]*:/ {
+      in_on=1; print; next
+    }
+    in_on {
+      if (/^[^[:space:]]/) { in_on=0; next }
+      print
+    }
+  ' <<<"$wf"
+}
+
 # --- classify_prt: classify a pull_request_target workflow ---
 # Args: wf_name wf_content wf_uncommented
 # Outputs: md_detail|csv_detail
@@ -600,12 +617,13 @@ analyze_repo() {
   local dp_wfs=()
   local dp_wfs_csv=()
 
-  local f wf_name wf_content wf_uncommented
+  local f wf_name wf_content wf_uncommented wf_triggers
 
   for f in "${wf_files[@]}"; do
     wf_name=$(basename "$f")
     wf_content=$(cat "$f" 2>/dev/null) || continue
     wf_uncommented=$(grep -v '^\s*#' <<<"$wf_content")
+    wf_triggers=$(extract_on_triggers "$wf_uncommented")
 
     # --- Permissions ---
     if grep -q 'permissions:' <<<"$wf_uncommented"; then
@@ -613,7 +631,7 @@ analyze_repo() {
     fi
 
     # --- pull_request_target ---
-    if [[ $wf_uncommented == *pull_request_target* ]]; then
+    if [[ $wf_triggers == *pull_request_target* ]]; then
       local prt_result
       prt_result=$(classify_prt "$wf_name" "$wf_content" "$wf_uncommented")
       prt_wfs+=("${prt_result%%|*}")
@@ -621,7 +639,7 @@ analyze_repo() {
     fi
 
     # --- issue_comment ---
-    if [[ $wf_uncommented == *issue_comment* ]]; then
+    if [[ $wf_triggers == *issue_comment* ]]; then
       local ic_result
       ic_result=$(classify_ic "$wf_name" "$wf_content" "$wf_uncommented")
       ic_wfs+=("${ic_result%%|*}")
@@ -645,7 +663,7 @@ analyze_repo() {
     fi
 
     # --- workflow_run ---
-    if [[ $wf_uncommented == *workflow_run* ]]; then
+    if [[ $wf_triggers == *workflow_run* ]]; then
       local wfr_result
       wfr_result=$(classify_wfr "$wf_name" "$wf_content" "$wf_uncommented")
       if [ -n "$wfr_result" ]; then

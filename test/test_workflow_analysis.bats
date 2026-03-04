@@ -258,6 +258,7 @@ _script_preamble() {
     export -f gh
 PREAMBLE
   # Extract helper and classify functions plus analyze_repo
+  sed -n '/^extract_on_triggers()/,/^}/p' "$SCRIPT"
   sed -n '/^find_workflow_files()/,/^}/p' "$SCRIPT"
   sed -n '/^join_array_cells()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_prt()/,/^}/p' "$SCRIPT"
@@ -841,6 +842,85 @@ _run_classify_dangerous_perms() {
   local dp_col
   dp_col=$(echo "$md_row" | cut -d'|' -f9)
   [ "$dp_col" = "No" ]
+}
+
+# =============================================================================
+# False positive: trigger keywords in run: string values (3zo)
+# =============================================================================
+
+@test "extract_on_triggers: extracts on: section from workflow" {
+  local input
+  input=$(cat <<'YAML'
+name: CI
+on:
+  pull_request_target:
+    types: [opened]
+  issue_comment:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "hello"
+YAML
+  )
+  run bash -c "
+    $(_script_preamble)
+    extract_on_triggers \"\$1\"
+  " -- "$input"
+  assert_success
+  assert_output --partial "pull_request_target"
+  assert_output --partial "issue_comment"
+  refute_output --partial "jobs:"
+  refute_output --partial "echo"
+}
+
+@test "extract_on_triggers: does not include run: block content" {
+  local input
+  input=$(cat <<'YAML'
+name: Build
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pull_request_target issue_comment workflow_run"
+YAML
+  )
+  run bash -c "
+    $(_script_preamble)
+    extract_on_triggers \"\$1\"
+  " -- "$input"
+  assert_success
+  assert_output --partial "push"
+  refute_output --partial "pull_request_target"
+  refute_output --partial "issue_comment"
+  refute_output --partial "workflow_run"
+}
+
+@test "analyze_repo: trigger keywords in run: string NOT flagged" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/trigger-keyword-in-run.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # PRT, IC, and WFR columns should all be "No"
+  refute_output --partial "pull_request_target"
+  refute_output --partial "issue_comment"
+  refute_output --partial "workflow_run"
+  refute_output --partial "checkout"
+  refute_output --partial "API-only"
+  refute_output --partial "author"
+}
+
+@test "analyze_repo: real PRT trigger still detected after on: extraction" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/prt-api-only.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "API-only"
 }
 
 # =============================================================================

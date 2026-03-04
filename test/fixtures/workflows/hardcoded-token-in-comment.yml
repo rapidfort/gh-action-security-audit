@@ -1,0 +1,10 @@
+name: CI
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Don't use hardcoded tokens like ghp_abc123def456ghi789jkl012mno345pqr678
+      - run: echo "clean workflow"

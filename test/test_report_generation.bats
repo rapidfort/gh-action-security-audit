@@ -108,7 +108,7 @@ teardown() {
 @test "CSV: has per-repo header row" {
   bash "$SCRIPT" test-org --local "$BATS_TEST_WORKFLOW_DIR" --out "$REPORT_FILE" --csv "$CSV_REPORT"
   run head -1 "$CSV_REPORT"
-  assert_output "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Repo Secrets"
+  assert_output "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Hardcoded Secrets,Harden-Runner,Repo Secrets"
 }
 
 @test "CSV: has org-secrets header after blank line" {

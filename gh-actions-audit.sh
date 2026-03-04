@@ -551,6 +551,29 @@ classify_dangerous_perms() {
   echo "$wf_name (**${danger_list}**)|$wf_name (${danger_list})"
 }
 
+# --- classify_hardcoded_secrets: detect hardcoded tokens/keys in a workflow ---
+# Args: wf_name wf_content wf_uncommented
+# Outputs: md_detail|csv_detail (or empty if none found)
+# Detects: ghp_ (GitHub PAT), gho_ (GitHub OAuth), AKIA (AWS access key)
+classify_hardcoded_secrets() {
+  local wf_name="$1" wf_content="$2" wf_uncommented="$3"
+  local found
+  found=$(grep -oE 'ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|AKIA[A-Z0-9]{16}' <<<"$wf_uncommented" 2>/dev/null \
+    | sort -u || true)
+  [ -z "$found" ] && return 0
+
+  local types=()
+  [[ $found == *ghp_* ]] && types+=("ghp_*")
+  [[ $found == *gho_* ]] && types+=("gho_*")
+  [[ $found == *AKIA* ]] && types+=("AKIA*")
+
+  local type_list
+  type_list=$(printf '%s, ' "${types[@]}")
+  type_list="${type_list%, }"
+
+  echo "$wf_name (**${type_list}**)|$wf_name (${type_list})"
+}
+
 # --- classify_unpinned: report pinned vs unpinned action refs in a workflow ---
 # Args: wf_name wf_content wf_uncommented
 # Outputs: md_detail|csv_detail (or empty string if no uses: lines)
@@ -616,6 +639,9 @@ analyze_repo() {
   local sh_wfs_csv=()
   local dp_wfs=()
   local dp_wfs_csv=()
+  local hs_wfs=()
+  local hs_wfs_csv=()
+  local has_harden_runner=0
 
   local f wf_name wf_content wf_uncommented wf_triggers
 
@@ -687,6 +713,19 @@ analyze_repo() {
       dp_wfs+=("${dp_result%%|*}")
       dp_wfs_csv+=("${dp_result#*|}")
     fi
+
+    # --- Hardcoded secrets ---
+    local hs_result
+    hs_result=$(classify_hardcoded_secrets "$wf_name" "$wf_content" "$wf_uncommented")
+    if [ -n "$hs_result" ]; then
+      hs_wfs+=("${hs_result%%|*}")
+      hs_wfs_csv+=("${hs_result#*|}")
+    fi
+
+    # --- Harden-runner ---
+    if [[ $wf_uncommented == *step-security/harden-runner* ]]; then
+      has_harden_runner=1
+    fi
   done
 
   # --- Build cells ---
@@ -730,6 +769,17 @@ analyze_repo() {
   dp_cell=$(join_array_cells '<br/>' "${dp_wfs[@]+"${dp_wfs[@]}"}")
   dp_csv=$(join_array_cells '; ' "${dp_wfs_csv[@]+"${dp_wfs_csv[@]}"}")
 
+  local hs_cell hs_csv
+  hs_cell=$(join_array_cells '<br/>' "${hs_wfs[@]+"${hs_wfs[@]}"}")
+  hs_csv=$(join_array_cells '; ' "${hs_wfs_csv[@]+"${hs_wfs_csv[@]}"}")
+
+  local hr_cell
+  if [ "$has_harden_runner" -eq 1 ]; then
+    hr_cell="Yes"
+  else
+    hr_cell="No"
+  fi
+
   local secrets_cell=""
   local secret_names
   secret_names=$(gh api "repos/$ORG/$repo/actions/secrets" --jq '.secrets[].name' 2>/dev/null) || {
@@ -743,8 +793,8 @@ analyze_repo() {
   fi
 
   # Write directly to output files — no fragile head/tail split
-  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${secrets_cell}" >>"$md_file"
-  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${secrets_cell}" >>"$csv_file"
+  echo "${repo}|${perms_cell}|${prt_cell}|${ic_cell}|${unpin_cell}|${expr_cell}|${wfr_cell}|${sh_cell}|${dp_cell}|${hs_cell}|${hr_cell}|${secrets_cell}" >>"$md_file"
+  echo "${repo}|${perms_csv}|${prt_csv}|${ic_csv}|${unpin_csv}|${expr_csv}|${wfr_csv}|${sh_csv}|${dp_csv}|${hs_csv}|${hr_cell}|${secrets_cell}" >>"$csv_file"
 }
 
 # Temp files to accumulate table rows
@@ -939,13 +989,17 @@ Columns:
   Especially dangerous when combined with `pull_request_target` or `issue_comment` triggers.
 - **Dangerous Permissions**: Workflows granting elevated permissions like `write-all`, `contents: write`,
   `actions: write`, or `id-token: write`. A `permissions:` block exists but grants excessive access.
+- **Hardcoded Secrets**: Workflows containing hardcoded tokens or API keys (e.g. `ghp_*`, `gho_*`, `AKIA*`).
+  These should use GitHub Secrets instead. The SpotBugs attack chain started with a PAT in a workflow file.
+- **Harden-Runner**: Whether any workflow uses [step-security/harden-runner](https://github.com/step-security/harden-runner)
+  for runtime monitoring (network egress, file integrity). Harden-runner detected the tj-actions compromise in real-time.
 - **Repo Secrets**: Secret names configured directly on the repo (not values). These are accessible
   to any workflow that runs in the repo, including exploited `pull_request_target` workflows.
 
 PERREPO
 
   # --- Summary statistics ---
-  # Fields: repo(1)|perms(2)|prt(3)|ic(4)|unpin(5)|expr(6)|wfr(7)|sh(8)|dp(9)|secrets(10)
+  # Fields: repo(1)|perms(2)|prt(3)|ic(4)|unpin(5)|expr(6)|wfr(7)|sh(8)|dp(9)|hs(10)|hr(11)|secrets(12)
   total_repos_scanned=$(wc -l <"$TABLE_ROWS_FILE" | tr -d ' ')
   no_perms_count=$(awk -F'|' '$2 ~ /None/ {c++} END {print c+0}' "$TABLE_ROWS_FILE")
   prt_count=$(awk -F'|' '$3 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
@@ -955,6 +1009,8 @@ PERREPO
   wfr_count=$(awk -F'|' '$7 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
   sh_count=$(awk -F'|' '$8 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
   dp_count=$(awk -F'|' '$9 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  hs_count=$(awk -F'|' '$10 != "No" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
+  hr_count=$(awk -F'|' '$11 == "Yes" {c++} END {print c+0}' "$TABLE_ROWS_FILE")
 
   echo "### Summary"
   echo ""
@@ -969,13 +1025,15 @@ PERREPO
   [ "$wfr_count" -gt 0 ] && echo "| Repos with \`workflow_run\` | $wfr_count |"
   [ "$sh_count" -gt 0 ] && echo "| Repos with self-hosted runners | $sh_count |"
   [ "$dp_count" -gt 0 ] && echo "| Repos with dangerous permissions | $dp_count |"
+  [ "$hs_count" -gt 0 ] && echo "| Repos with hardcoded secrets | $hs_count |"
+  echo "| Repos with harden-runner | $hr_count/$total_repos_scanned |"
   echo ""
 
-  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expr Injection | \`workflow_run\` | Self-Hosted | Dangerous Perms | Repo Secrets |"
-  echo "|------------|-------------|----------------------|-----------------|-----------------|----------------|---------------|-------------|-----------------|--------------|"
+  echo "| Repository | Permissions | \`pull_request_target\` | \`issue_comment\` | Unpinned Actions | Expr Injection | \`workflow_run\` | Self-Hosted | Dangerous Perms | Hardcoded Secrets | Harden-Runner | Repo Secrets |"
+  echo "|------------|-------------|----------------------|-----------------|-----------------|----------------|---------------|-------------|-----------------|-------------------|---------------|--------------|"
 
-  while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp secrets; do
-    echo "| [\`$repo\`](https://github.com/$ORG/$repo/tree/HEAD/.github/workflows) | $perms | $prt | $ic | $unpin | $expr | $wfr | $sh | $dp | $secrets |"
+  while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp hs hr secrets; do
+    echo "| [\`$repo\`](https://github.com/$ORG/$repo/tree/HEAD/.github/workflows) | $perms | $prt | $ic | $unpin | $expr | $wfr | $sh | $dp | $hs | $hr | $secrets |"
   done < <(sort "$TABLE_ROWS_FILE")
 
   # --- Org secrets section ---
@@ -1086,9 +1144,9 @@ if [ -n "$CSV_FILE" ]; then
   }
 
   {
-    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Repo Secrets"
-    while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp secrets; do
-      printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    echo "Repository,Explicit Permissions,pull_request_target,issue_comment,Unpinned Actions,Expression Injection,workflow_run,Self-Hosted,Dangerous Perms,Hardcoded Secrets,Harden-Runner,Repo Secrets"
+    while IFS='|' read -r repo perms prt ic unpin expr wfr sh dp hs hr secrets; do
+      printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
         "$(csv_field "$repo")" \
         "$(csv_field "$perms")" \
         "$(csv_field "$prt")" \
@@ -1098,6 +1156,8 @@ if [ -n "$CSV_FILE" ]; then
         "$(csv_field "$wfr")" \
         "$(csv_field "$sh")" \
         "$(csv_field "$dp")" \
+        "$(csv_field "$hs")" \
+        "$(csv_field "$hr")" \
         "$(csv_field "$secrets")"
     done < <(sort "$TABLE_ROWS_CSV_FILE")
 

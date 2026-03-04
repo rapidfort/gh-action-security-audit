@@ -268,6 +268,7 @@ PREAMBLE
   sed -n '/^classify_wfr()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_self_hosted()/,/^}/p' "$SCRIPT"
   sed -n '/^classify_dangerous_perms()/,/^}/p' "$SCRIPT"
+  sed -n '/^classify_hardcoded_secrets()/,/^}/p' "$SCRIPT"
   sed -n '/^analyze_repo()/,/^}/p' "$SCRIPT"
 }
 
@@ -842,6 +843,121 @@ _run_classify_dangerous_perms() {
   local dp_col
   dp_col=$(echo "$md_row" | cut -d'|' -f9)
   [ "$dp_col" = "No" ]
+}
+
+# =============================================================================
+# Hardcoded secrets detection (ub8)
+# =============================================================================
+
+@test "hardcoded-token: detects ghp_ token in workflow" {
+  run grep -cE 'ghp_[A-Za-z0-9]{36}' "$FIXTURES_DIR/workflows/hardcoded-token.yml"
+  assert_success
+}
+
+@test "hardcoded-aws-key: detects AKIA prefix in workflow" {
+  run grep -cE 'AKIA[A-Z0-9]{16}' "$FIXTURES_DIR/workflows/hardcoded-aws-key.yml"
+  assert_success
+}
+
+@test "hardcoded-token-in-comment: token in comment line NOT detected" {
+  run grep -v '^\s*#' "$FIXTURES_DIR/workflows/hardcoded-token-in-comment.yml"
+  assert_success
+  refute_output --partial "ghp_"
+}
+
+@test "classify_hardcoded_secrets: detects ghp_ token" {
+  run _run_classifier classify_hardcoded_secrets "$FIXTURES_DIR/workflows/hardcoded-token.yml"
+  assert_success
+  assert_output --partial "ghp_"
+}
+
+@test "classify_hardcoded_secrets: detects AKIA key" {
+  run _run_classifier classify_hardcoded_secrets "$FIXTURES_DIR/workflows/hardcoded-aws-key.yml"
+  assert_success
+  assert_output --partial "AKIA"
+}
+
+@test "classify_hardcoded_secrets: comment-only token returns empty" {
+  run _run_classifier classify_hardcoded_secrets "$FIXTURES_DIR/workflows/hardcoded-token-in-comment.yml"
+  assert_success
+  assert_output ""
+}
+
+@test "classify_hardcoded_secrets: clean workflow returns empty" {
+  run _run_classifier classify_hardcoded_secrets "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_success
+  assert_output ""
+}
+
+# =============================================================================
+# Harden-runner adoption (ub8)
+# =============================================================================
+
+@test "harden-runner-used: detects step-security/harden-runner" {
+  run grep -q 'step-security/harden-runner' "$FIXTURES_DIR/workflows/harden-runner-used.yml"
+  assert_success
+}
+
+@test "harden-runner: benign workflow does NOT have harden-runner" {
+  run grep -q 'step-security/harden-runner' "$FIXTURES_DIR/workflows/benign-workflow.yml"
+  assert_failure
+}
+
+@test "analyze_repo: hardcoded ghp_ token reported in output" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/hardcoded-token.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "ghp_"
+}
+
+@test "analyze_repo: hardcoded AKIA key reported in output" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/hardcoded-aws-key.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "AKIA"
+}
+
+@test "analyze_repo: commented-out token has No in hardcoded secrets column" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/hardcoded-token-in-comment.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  # Field 10 (hardcoded secrets) should be No
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  local hs_col
+  hs_col=$(echo "$md_row" | cut -d'|' -f10)
+  [ "$hs_col" = "No" ]
+}
+
+@test "analyze_repo: harden-runner workflow reports adoption" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/harden-runner-used.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  assert_output --partial "harden-runner"
+}
+
+@test "analyze_repo: benign workflow has No in hardcoded secrets and harden-runner columns" {
+  setup_fixture_dir "test-org" "test-repo"
+  cp "$FIXTURES_DIR/workflows/benign-workflow.yml" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo/"
+
+  run _run_analyze_repo "test-repo" "$BATS_TEST_WORKFLOW_DIR/test-org/test-repo"
+  assert_success
+  local md_row
+  md_row=$(echo "$output" | head -1)
+  # Field 10 (hardcoded secrets) = No, Field 11 (harden-runner) = No
+  local hs_col hr_col
+  hs_col=$(echo "$md_row" | cut -d'|' -f10)
+  hr_col=$(echo "$md_row" | cut -d'|' -f11)
+  [ "$hs_col" = "No" ]
+  [ "$hr_col" = "No" ]
 }
 
 # =============================================================================

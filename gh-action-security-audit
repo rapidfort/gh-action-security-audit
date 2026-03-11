@@ -428,6 +428,11 @@ else
 
     while IFS= read -r wf; do
       [ -z "$wf" ] && continue
+      # Defense-in-depth: skip filenames with path separators or parent refs
+      if [[ "$wf" == */* ]] || [[ "$wf" == *..* ]]; then
+        warn "Skipping suspicious workflow filename: $wf"
+        continue
+      fi
       content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || true)
       if [ -n "$content" ]; then
         echo "$content" | "${BASE64_DECODE[@]}" >"$repo_dir/$wf" 2>/dev/null || true
